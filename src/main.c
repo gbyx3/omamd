@@ -34,10 +34,12 @@
 #include "markdown.h"
 
 #include <ctype.h>
+#include <fontconfig/fontconfig.h>
 #include <gtk/gtk.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <webkit2/webkit2.h>
 
 /* A #define is a name the preprocessor pastes in before compiling.
@@ -46,6 +48,9 @@
 
 /* Refuse to slurp a multi-gigabyte "markdown" file into RAM. */
 #define OMAMD_MAX_FILE_BYTES (32u * 1024u * 1024u)
+
+/* Directory that holds the bundled iA Writer Mono S files, or "". */
+static char g_font_dir[4200];
 
 /* ---------------------------------------------------------------
  * The App struct: all the program's live state in one bundle.
@@ -206,6 +211,124 @@ static char *dir_of(const char *path)
     memcpy(dir, path, n);
     dir[n] = '\0';
     return dir;
+}
+
+/*
+ * iA Writer Mono S is bundled under the SIL Open Font License 1.1
+ * (see fonts/OFL.txt).  We register the files with fontconfig so GTK
+ * and WebKit can see the family without a system install, then look
+ * next to the binary, in ~/.local/share/omamd/fonts, and in
+ * /usr/share/omamd/fonts.
+ */
+static int font_dir_ok(const char *dir)
+{
+    char path[4200];
+    if (!dir || !dir[0])
+        return 0;
+    snprintf(path, sizeof(path), "%s/iAWriterMonoS-Regular.ttf", dir);
+    return g_file_test(path, G_FILE_TEST_IS_REGULAR);
+}
+
+static int adopt_font_dir(const char *dir)
+{
+    char *real;
+    if (!font_dir_ok(dir))
+        return 0;
+    real = realpath(dir, NULL);
+    if (real) {
+        snprintf(g_font_dir, sizeof(g_font_dir), "%s", real);
+        free(real);
+    } else {
+        snprintf(g_font_dir, sizeof(g_font_dir), "%s", dir);
+    }
+    return 1;
+}
+
+static void load_app_fonts(void)
+{
+    static const char *files[] = {
+        "iAWriterMonoS-Regular.ttf",
+        "iAWriterMonoS-Italic.ttf",
+        "iAWriterMonoS-Bold.ttf",
+        "iAWriterMonoS-BoldItalic.ttf",
+    };
+    const char *env = getenv("OMAMD_FONTDIR");
+    const char *home = getenv("HOME");
+    char buf[4200];
+    char exe[4096];
+    ssize_t n;
+    size_t i;
+
+    g_font_dir[0] = '\0';
+    if (env && adopt_font_dir(env))
+        goto add;
+
+    n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (n > 0) {
+        char *slash;
+        exe[n] = '\0';
+        slash = strrchr(exe, '/');
+        if (slash) {
+            *slash = '\0';
+            snprintf(buf, sizeof(buf), "%s/../fonts", exe);
+            if (adopt_font_dir(buf))
+                goto add;
+            snprintf(buf, sizeof(buf), "%s/fonts", exe);
+            if (adopt_font_dir(buf))
+                goto add;
+        }
+    }
+
+    if (home) {
+        snprintf(buf, sizeof(buf), "%s/.local/share/omamd/fonts", home);
+        if (adopt_font_dir(buf))
+            goto add;
+    }
+    if (adopt_font_dir("/usr/share/omamd/fonts"))
+        goto add;
+    if (adopt_font_dir("fonts"))
+        goto add;
+    return;
+
+add:
+    for (i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+        snprintf(buf, sizeof(buf), "%s/%s", g_font_dir, files[i]);
+        FcConfigAppFontAddFile(NULL, (const FcChar8 *)buf);
+    }
+}
+
+static void append_bundled_fonts(GString *s)
+{
+    static const struct {
+        const char *file;
+        const char *style;
+        const char *weight;
+    } faces[] = {
+        { "iAWriterMonoS-Regular.ttf", "normal", "400" },
+        { "iAWriterMonoS-Italic.ttf", "italic", "400" },
+        { "iAWriterMonoS-Bold.ttf", "normal", "700" },
+        { "iAWriterMonoS-BoldItalic.ttf", "italic", "700" },
+    };
+    size_t i;
+
+    if (!g_font_dir[0])
+        return;
+    for (i = 0; i < sizeof(faces) / sizeof(faces[0]); i++) {
+        char path[4400];
+        char *uri;
+        snprintf(path, sizeof(path), "%s/%s", g_font_dir, faces[i].file);
+        uri = g_filename_to_uri(path, NULL, NULL);
+        if (!uri)
+            continue;
+        g_string_append(s, "@font-face{font-family:\"iA Writer Mono S\";font-style:");
+        g_string_append(s, faces[i].style);
+        g_string_append(s, ";font-weight:");
+        g_string_append(s, faces[i].weight);
+        g_string_append(s, ";src:url('");
+        g_string_append(s, uri);
+        g_string_append(s, "') format('truetype');font-display:swap;}");
+        g_free(uri);
+    }
 }
 
 static int ends_with_ci(const char *s, const char *suffix)
@@ -405,9 +528,9 @@ static char *build_css(const Palette *p)
         "  margin: 0;\n"
         "}\n"
         "body {\n"
-        "  font-family: system-ui, \"Noto Sans\", \"P052\", sans-serif;\n"
-        "  font-size: 17px;\n"
-        "  line-height: 1.65;\n"
+        "  font-family: \"iA Writer Mono S\", ui-monospace, monospace;\n"
+        "  font-size: 16px;\n"
+        "  line-height: 1.7;\n"
         "}\n"
         "article.md {\n"
         "  max-width: 42rem;\n"
@@ -416,7 +539,7 @@ static char *build_css(const Palette *p)
         "}\n"
         "h1, h2, h3, h4, h5, h6 {\n"
         "  line-height: 1.25;\n"
-        "  font-weight: 650;\n"
+        "  font-weight: 700;\n"
         "  margin: 1.6em 0 0.5em;\n"
         "}\n"
         "h1 { font-size: 2.0em; margin-top: 0; }\n"
@@ -427,9 +550,8 @@ static char *build_css(const Palette *p)
         "a { color: var(--accent); text-decoration: none; }\n"
         "a:hover { text-decoration: underline; }\n"
         "code {\n"
-        "  font-family: \"CaskaydiaMono Nerd Font\", \"JetBrains Mono\",\n"
-        "               ui-monospace, monospace;\n"
-        "  font-size: 0.88em;\n"
+        "  font-family: \"iA Writer Mono S\", ui-monospace, monospace;\n"
+        "  font-size: 0.92em;\n"
         "  background: var(--code-bg);\n"
         "  padding: 0.12em 0.38em;\n"
         "  border-radius: 4px;\n"
@@ -488,6 +610,7 @@ static void apply_ui_css(App *app, const Palette *p)
         "textview, textview text {"
         "  background-color: %s;"
         "  color: %s;"
+        "  font-family: \"iA Writer Mono S\", monospace;"
         "}"
         "#omamd-mode-toggle {"
         "  min-width: 44px;"
@@ -552,6 +675,7 @@ static char *wrap_document(const char *title, const char *css, const char *body)
         "<title>");
     escape_html_str(s, title ? title : "omamd");
     g_string_append(s, "</title><style>");
+    append_bundled_fonts(s);
     g_string_append(s, css ? css : "");
     g_string_append(s, "</style></head><body><article class=\"md\">");
     g_string_append(s, body ? body : "");
@@ -1397,7 +1521,7 @@ static void build_ui(App *app)
     app->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(app->window), "omamd");
     gtk_window_set_default_size(GTK_WINDOW(app->window), 860, 960);
-    gtk_window_set_icon_name(GTK_WINDOW(app->window), "text-x-generic");
+    gtk_window_set_icon_name(GTK_WINDOW(app->window), "omamd");
     /* No titlebar, no GTK close/min/max.  Hyprland still draws the
      * window border.  Close with Ctrl+Q (or the compositor's kill). */
     gtk_window_set_decorated(GTK_WINDOW(app->window), FALSE);
@@ -1565,6 +1689,8 @@ int main(int argc, char **argv)
         }
         path = argv[i];
     }
+
+    load_app_fonts();
 
     if (html_mode)
         return run_html_mode(path);

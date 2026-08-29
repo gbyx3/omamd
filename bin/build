@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+JOBS="$(nproc 2>/dev/null || echo 1)"
+
+make -C "$ROOT" -j"$JOBS"
+
+echo "Built $ROOT/build/omamd"

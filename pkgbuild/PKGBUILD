@@ -1,0 +1,32 @@
+# Maintainer: Gustav Alerby <g.alerby@gmail.com>
+
+pkgname=omamd
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Markdown viewer for files that come out of AI work'
+arch=('x86_64')
+url='https://github.com/gbyx3/omamd'
+license=('MIT' 'OFL-1.1')
+install='omamd.install'
+depends=('gtk3' 'webkit2gtk-4.1')
+makedepends=('gcc' 'make' 'pkgconf')
+source=()
+sha256sums=()
+
+build() {
+  cd "$startdir/.."
+  ./bin/build
+}
+
+package() {
+  cd "$startdir/.."
+  /usr/bin/install -Dm755 build/omamd "$pkgdir/usr/bin/omamd"
+  /usr/bin/install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  /usr/bin/install -Dm644 fonts/OFL.txt "$pkgdir/usr/share/licenses/$pkgname/OFL.txt"
+  /usr/bin/install -Dm644 "$startdir/omamd.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/omamd.svg"
+  /usr/bin/install -Dm644 "$startdir/omamd.desktop" "$pkgdir/usr/share/applications/omamd.desktop"
+  /usr/bin/install -Dm644 fonts/iAWriterMonoS-Regular.ttf "$pkgdir/usr/share/omamd/fonts/iAWriterMonoS-Regular.ttf"
+  /usr/bin/install -Dm644 fonts/iAWriterMonoS-Italic.ttf "$pkgdir/usr/share/omamd/fonts/iAWriterMonoS-Italic.ttf"
+  /usr/bin/install -Dm644 fonts/iAWriterMonoS-Bold.ttf "$pkgdir/usr/share/omamd/fonts/iAWriterMonoS-Bold.ttf"
+  /usr/bin/install -Dm644 fonts/iAWriterMonoS-BoldItalic.ttf "$pkgdir/usr/share/omamd/fonts/iAWriterMonoS-BoldItalic.ttf"
+}

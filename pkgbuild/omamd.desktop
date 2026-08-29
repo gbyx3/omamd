@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=omamd
+GenericName=Markdown Viewer
+Comment=Markdown renderer for the agentic era
+Exec=omamd %f
+Icon=omamd
+Terminal=false
+Categories=Office;Viewer;
+MimeType=text/markdown;text/x-markdown;text/plain;
+Keywords=markdown;md;viewer;preview;ai;agent;
+StartupWMClass=omamd

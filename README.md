@@ -1,13 +1,82 @@
 # omamd
 
-A Markdown viewer for files that come out of AI work: chat exports, generated docs, READMEs, notes dumped to `.md`. Open them in a window that follows your Omarchy theme, or convert them to HTML.
+A Markdown renderer for the agentic era. Point it at `.md` files agents write — chat exports, generated docs, READMEs, notes — and it follows your Omarchy theme, reloads as the file grows, and converts to HTML when you need a page.
+
+**Repo:** https://github.com/gbyx3/omamd
+
+## Install via an agent
+
+Paste that URL into your agent and tell it to install omamd. The agent should follow this procedure exactly, without skipping steps or asking for a different prefix.
+
+### 1. Clone
 
 ```
-make
-./omamd examples/welcome.md
+git clone https://github.com/gbyx3/omamd.git
+cd omamd
 ```
 
-Needs `gtk3` and `webkit2gtk-4.1` (already on Omarchy).
+SSH if the environment already uses it: `git@github.com:gbyx3/omamd.git`
+
+### 2. Dependencies
+
+Need `gcc`, `make`, `pkgconf`, `gtk3`, and `webkit2gtk-4.1`.
+
+On **Omarchy** they are already installed. If a check fails:
+
+```
+omarchy pkg add gtk3 webkit2gtk-4.1
+```
+
+On other **Arch**:
+
+```
+sudo pacman -S --needed gcc make pkgconf gtk3 webkit2gtk-4.1
+```
+
+### 3. Build
+
+```
+./bin/build
+```
+
+Expect `Built …/omamd/build/omamd`. Run `./bin/test` if you want the parser smoke check.
+
+### 4. User-local install (no sudo)
+
+```
+make install
+```
+
+This installs:
+
+| Path | What |
+|------|------|
+| `~/.local/bin/omamd` | binary |
+| `~/.local/share/applications/omamd.desktop` | launcher entry |
+| `~/.local/share/icons/hicolor/scalable/apps/omamd.svg` | icon |
+| `~/.local/share/omamd/fonts/` | iA Writer Mono S (OFL) |
+
+`~/.local/bin` is on `PATH` on Omarchy. If `command -v omamd` fails, prepend it: `export PATH="$HOME/.local/bin:$PATH"`.
+
+Do **not** use `./bin/install` unless the user asked for a system-wide Arch package. That path runs `makepkg` and needs sudo.
+
+### 5. Verify
+
+```
+command -v omamd
+omamd --html examples/welcome.md | grep -q '<h1>'
+test -f "$HOME/.local/share/applications/omamd.desktop"
+```
+
+All three should succeed. Then:
+
+```
+omamd examples/welcome.md
+```
+
+The Omarchy launcher should list **omamd**. Markdown files can be opened with it from the file manager.
+
+Later updates: `git pull && ./bin/build && make install` from the clone.
 
 ## Viewer
 
@@ -15,7 +84,7 @@ Needs `gtk3` and `webkit2gtk-4.1` (already on Omarchy).
 omamd notes.md
 ```
 
-Bare window, no title bar. The round button in the top-right switches Preview and Source and stays put while you scroll. If the file changes on disk — an AI run appending to it, or a save from another editor — omamd reloads and eases down to the new bottom. Drop a `.md` on the window to open it. Relative links to other Markdown files in the same folder open in omamd; `http`/`https` links go to the browser.
+Bare window, no title bar. The round button in the top-right switches Preview and Source and stays put while you scroll. If the file changes on disk — an agent appending to it, or a save from another editor — omamd reloads and eases down to the new bottom. Drop a `.md` on the window to open it. Relative links to other Markdown files in the same folder open in omamd; `http`/`https` links go to the browser.
 
 The preview uses the current Omarchy palette (`~/.local/state/omarchy/current/theme/colors.toml`) and updates when you `omarchy theme set`.
 
@@ -35,7 +104,7 @@ omamd --html < notes.md > notes.html
 
 Turns Markdown into a full HTML document (styled with the current Omarchy colours) on stdout. No window. Useful when a pipeline already has `.md` and you want a page you can archive or attach.
 
-Unsafe URL schemes (`javascript:`, `file:`, `data:text/html`, rooted `/etc/...` paths) are stripped so the HTML is fit to open in a browser. See `ISSUES.md`.
+Unsafe URL schemes (`javascript:`, `file:`, `data:text/html`, rooted `/etc/...` paths) are stripped so the HTML is fit to open in a browser.
 
 ## Markdown it understands
 
@@ -49,3 +118,8 @@ Written in C, commented for someone new to the language.
 2. `src/markdown.c` — Markdown → HTML
 3. `src/main.c` — window, file loading, Omarchy colours
 4. `Makefile` — how `gcc` is invoked
+5. `bin/` — `build`, `test`, `install`
+6. `pkgbuild/` — Arch package, desktop entry, and icon
+7. `fonts/` — iA Writer Mono S (SIL Open Font License 1.1; see `fonts/OFL.txt`)
+
+The preview and source views use the same iA Writer Mono that omawrite bundles. It is an OFL font: we may bundle and redistribute it with the app; we do not rename it.
