@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=omamd
+Name=Omamd
 GenericName=Markdown Viewer
 Comment=Markdown renderer for the agentic era
 Exec=omamd %f

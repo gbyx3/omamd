@@ -1,4 +1,4 @@
-# omamd
+# Omamd
 
 A Markdown renderer for the agentic era. Point it at `.md` files agents write — chat exports, generated docs, READMEs, notes — and it follows your Omarchy theme, reloads as the file grows, and converts to HTML when you need a page.
 
