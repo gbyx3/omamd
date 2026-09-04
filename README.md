@@ -1,6 +1,6 @@
 # Omamd
 
-A Markdown renderer for the agentic era. Point it at `.md` files agents write — chat exports, generated docs, READMEs, notes — and it follows your Omarchy theme, reloads as the file grows, and converts to HTML when you need a page.
+A Markdown renderer for the agentic era. Point it at `.md` files agents write — chat exports, generated docs, READMEs, notes — and it follows your Omarchy theme, reloads as the file grows, renders in the terminal over SSH, and converts to HTML when you need a page.
 
 **Repo:** https://github.com/gbyx3/omamd
 
@@ -65,10 +65,11 @@ Do **not** use `./bin/install` unless the user asked for a system-wide Arch pack
 ```
 command -v omamd
 omamd --html examples/welcome.md | grep -q '<h1>'
+omamd --term examples/welcome.md | grep -q Welcome
 test -f "$HOME/.local/share/applications/omamd.desktop"
 ```
 
-All three should succeed. Then:
+All four should succeed. Then:
 
 ```
 omamd examples/welcome.md
@@ -102,7 +103,19 @@ omamd --term notes.md
 omamd -t notes.md
 ```
 
-Renders in the terminal — no GTK window. Over SSH, `omamd notes.md` does this automatically when there is no display. A TTY opens a pager (`j`/`k` scroll, `g`/`G` top/end, `f` follow, `q` quit). Follow starts on when a file is open: if it changes, the view reloads and jumps to the bottom. `f` turns that off (the view stays put) or back on (jumps to the end). Piped stdout is just ANSI text (`omamd --term notes.md | less -R`). Set `NO_COLOR` for plain text.
+No GTK window. Markdown is rendered as colour text in the terminal, using the same Omarchy palette as the viewer. Over SSH — no `WAYLAND_DISPLAY` or `DISPLAY` — `omamd notes.md` does this by itself.
+
+A TTY opens a pager. If the file is being written — an agent appending to it — omamd reloads. Follow starts **on**: the view jumps to the new bottom. `f` pins the view where you are; `f` again jumps to the end and keeps chasing it.
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` / arrows | Scroll |
+| `space` / `b` | Page down / up |
+| `g` / `G` | Top / end |
+| `f` | Toggle follow |
+| `q` | Quit |
+
+Piped stdout is just ANSI (`omamd --term notes.md | less -R`). Set `NO_COLOR` for plain text.
 
 ## Markdown to HTML converter
 
@@ -126,9 +139,10 @@ Written in C, commented for someone new to the language.
 1. `src/markdown.h` — the converter’s public function
 2. `src/markdown.c` — Markdown → HTML
 3. `src/main.c` — window, file loading, Omarchy colours
-4. `Makefile` — how `gcc` is invoked
-5. `bin/` — `build`, `test`, `install`
-6. `pkgbuild/` — Arch package, desktop entry, and icon
-7. `fonts/` — iA Writer Mono S (SIL Open Font License 1.1; see `fonts/OFL.txt`)
+4. `src/term.h` / `src/term.c` — ANSI render and the SSH pager
+5. `Makefile` — how `gcc` is invoked
+6. `bin/` — `build`, `test`, `install`
+7. `pkgbuild/` — Arch package, desktop entry, and icon
+8. `fonts/` — iA Writer Mono S (SIL Open Font License 1.1; see `fonts/OFL.txt`)
 
 The preview and source views use the same iA Writer Mono that omawrite bundles. It is an OFL font: we may bundle and redistribute it with the app; we do not rename it.
