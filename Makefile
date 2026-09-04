@@ -13,7 +13,7 @@ CFLAGS  += $(shell pkg-config --cflags $(PKGS))
 LDFLAGS ?=
 LDLIBS  := $(shell pkg-config --libs $(PKGS))
 
-SRC      := src/main.c src/markdown.c
+SRC      := src/main.c src/markdown.c src/term.c
 BUILDDIR := build
 BIN      := $(BUILDDIR)/omamd
 
@@ -23,7 +23,7 @@ PREFIX ?= $(HOME)/.local
 
 all: $(BIN)
 
-$(BIN): $(SRC) src/markdown.h
+$(BIN): $(SRC) src/markdown.h src/term.h
 	mkdir -p $(BUILDDIR)
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS) $(LDLIBS)
 
@@ -42,6 +42,8 @@ test: $(BIN)
 	! $(BIN) --html examples/security.md | grep -q 'file:///etc/passwd'
 	! $(BIN) --html examples/security.md | grep -q 'data:text/html'
 	! $(BIN) --html examples/security.md | grep -q 'src="/etc/passwd"'
+	$(BIN) --term examples/welcome.md | grep -q 'Welcome'
+	! $(BIN) --term examples/welcome.md | grep -q '<h1>'
 	@echo "ok"
 
 install: $(BIN) pkgbuild/omamd.desktop pkgbuild/omamd.svg

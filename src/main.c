@@ -32,6 +32,7 @@
  */
 
 #include "markdown.h"
+#include "term.h"
 
 #include <ctype.h>
 #include <fontconfig/fontconfig.h>
@@ -1607,11 +1608,13 @@ static void usage(FILE *out)
             "\n"
             "Usage:\n"
             "  omamd [file.md]         open in a window\n"
-            "  omamd --html [file.md]  print HTML (stdin if no file)\n"
+            "  omamd --term [file.md]  render in the terminal (SSH)\n"
+            "  omamd --html [file.md]  Markdown to HTML on stdout\n"
             "  omamd --help            this text\n"
             "\n"
             "Keys:  Ctrl+O open   Ctrl+R reload   Ctrl+1 preview\n"
-            "       Ctrl+2 source Ctrl+Q quit     F5 reload\n",
+            "       Ctrl+2 source Ctrl+Q quit     F5 reload\n"
+            "Term:  j/k scroll    g/G top/end     f follow  q quit\n",
             OMAMD_VERSION);
 }
 
@@ -1662,9 +1665,74 @@ static int run_html_mode(const char *path)
     return 0;
 }
 
+static unsigned rgb_parse(const char *s)
+{
+    unsigned r = 0xcd, g = 0xd6, b = 0xf4;
+    if (!s || s[0] != '#')
+        return (r << 16) | (g << 8) | b;
+    if (s[1] && s[2] && s[3] && s[4] == '\0') {
+        if (sscanf(s, "#%1x%1x%1x", &r, &g, &b) == 3)
+            return (r * 17u << 16) | (g * 17u << 8) | (b * 17u);
+    }
+    if (sscanf(s, "#%02x%02x%02x", &r, &g, &b) == 3)
+        return (r << 16) | (g << 8) | b;
+    return (0xcdu << 16) | (0xd6u << 8) | 0xf4u;
+}
+
+static char *term_reread(const char *path, size_t *n)
+{
+    return read_entire_file(path, n);
+}
+
+static int no_display(void)
+{
+    const char *w = getenv("WAYLAND_DISPLAY");
+    const char *d = getenv("DISPLAY");
+    return (w == NULL || w[0] == '\0') && (d == NULL || d[0] == '\0');
+}
+
+static int run_term_mode(const char *path)
+{
+    size_t n = 0;
+    char *md;
+    Palette pal;
+    TermPalette tp;
+    int rc;
+    const char *watch = path;
+
+    if (path) {
+        md = read_entire_file(path, &n);
+        if (!md) {
+            fprintf(stderr, "omamd: cannot read %s\n", path);
+            return 1;
+        }
+    } else {
+        md = read_entire_stdin(&n);
+        if (!md) {
+            fprintf(stderr, "omamd: out of memory\n");
+            return 1;
+        }
+        watch = NULL;
+    }
+
+    palette_load_omarchy(&pal);
+    memset(&tp, 0, sizeof(tp));
+    tp.color = getenv("NO_COLOR") == NULL;
+    tp.fg = rgb_parse(pal.fg);
+    tp.bg = rgb_parse(pal.bg);
+    tp.accent = rgb_parse(pal.accent);
+    tp.muted = rgb_parse(pal.muted);
+    tp.code_bg = rgb_parse(pal.code_bg);
+
+    rc = term_run(watch, md, n, &tp, watch ? term_reread : NULL);
+    free(md);
+    return rc;
+}
+
 int main(int argc, char **argv)
 {
     int html_mode = 0;
+    int term_mode = 0;
     const char *path = NULL;
     int i;
     App *app;
@@ -1682,6 +1750,10 @@ int main(int argc, char **argv)
             html_mode = 1;
             continue;
         }
+        if (strcmp(argv[i], "--term") == 0 || strcmp(argv[i], "-t") == 0) {
+            term_mode = 1;
+            continue;
+        }
         if (argv[i][0] == '-') {
             fprintf(stderr, "omamd: unknown option %s\n", argv[i]);
             usage(stderr);
@@ -1694,6 +1766,10 @@ int main(int argc, char **argv)
 
     if (html_mode)
         return run_html_mode(path);
+    if (!term_mode && !html_mode && no_display())
+        term_mode = 1;
+    if (term_mode)
+        return run_term_mode(path);
 
     /* gtk_init may strip GTK-specific arguments from argv. */
     gtk_init(&argc, &argv);

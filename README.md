@@ -95,6 +95,15 @@ The preview uses the current Omarchy palette (`~/.local/state/omarchy/current/th
 | `Ctrl+1` / `Ctrl+2` | Preview / Source |
 | `Ctrl+Q` | Quit |
 
+## Terminal (SSH)
+
+```
+omamd --term notes.md
+omamd -t notes.md
+```
+
+Renders in the terminal — no GTK window. Over SSH, `omamd notes.md` does this automatically when there is no display. A TTY opens a pager (`j`/`k` scroll, `g`/`G` top/end, `f` follow, `q` quit). Follow starts on when a file is open: if it changes, the view reloads and jumps to the bottom. `f` turns that off (the view stays put) or back on (jumps to the end). Piped stdout is just ANSI text (`omamd --term notes.md | less -R`). Set `NO_COLOR` for plain text.
+
 ## Markdown to HTML converter
 
 ```
