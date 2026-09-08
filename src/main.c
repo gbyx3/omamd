@@ -1771,8 +1771,11 @@ int main(int argc, char **argv)
     if (term_mode)
         return run_term_mode(path);
 
-    /* gtk_init may strip GTK-specific arguments from argv. */
-    gtk_init(&argc, &argv);
+    /* gtk_init_check talks to the display.  If the socket is gone
+     * (SSH without forwarding, empty DISPLAY), open the pager
+     * instead of dying with "cannot open display". */
+    if (!gtk_init_check(&argc, &argv))
+        return run_term_mode(path);
 
     app = calloc(1, sizeof(App));
     if (!app)
