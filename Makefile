@@ -37,7 +37,7 @@ endif
 
 PREFIX ?= $(HOME)/.local
 
-.PHONY: all clean test test-cli test-gtk install
+.PHONY: all clean test test-cli test-gtk test-mac install
 
 all: $(BIN)
 ifeq ($(HAVE_GTK),yes)
@@ -92,6 +92,10 @@ test: test-cli
 ifeq ($(HAVE_GTK),yes)
 test: test-gtk
 endif
+
+# Mac .app.  Not part of `make test` so Linux stays gcc-only.
+test-mac:
+	xcodebuild -project apple/Omamd.xcodeproj -scheme Omamd -configuration Debug -destination 'platform=macOS' build
 
 install: $(BIN) pkgbuild/omamd.desktop pkgbuild/omamd.svg
 	install -Dm755 $(BIN) $(DESTDIR)$(PREFIX)/bin/omamd

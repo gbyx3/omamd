@@ -81,15 +81,15 @@ GTK-free binary. `make test` uses the CLI.
 `src/` → `core/` + `linux/` + `cli/`. `core/omamd.h` is the umbrella
 header for Swift. Makefile uses `-I core -I cli`. No behaviour change.
 
-### PR 4 — Xcode skeleton (Mac first)
+### PR 4 — Xcode skeleton (Mac first) — done on this branch
 
 `apple/` SwiftUI app, macOS target. Bundle id `rocks.gurra.omamd`.
-Bridging header includes `omamd.h` (markdown, theme, html, util).
-One screen: WKWebView loading `omamd_document()` of
-`examples/welcome.md`. Bundle the OFL fonts; register them with
-Core Text. Viewer (`WindowGroup` + Open), not `DocumentGroup`.
-Makefile `build/omamd` stays the CLI; the `.app` does not link
-`cli.c`, `term.c`, or GTK.
+Bridging header includes `omamd.h`. One screen: WKWebView loading
+`omamd_document()` of bundled `examples/welcome.md`. OFL fonts are
+copied into the app bundle and registered with Core Text.
+`Omamd.page(...)` is the Swift overlay; views do not call C pointers.
+Viewer (`WindowGroup`), not `DocumentGroup`. The `.app` does not
+link `cli.c`, `term.c`, or GTK. `make test-mac` runs `xcodebuild`.
 
 ### PR 5 — Mac viewer behaviour
 
@@ -138,4 +138,5 @@ for the Mac app and the iOS simulator.
 
 ```
 make test
+make test-mac
 ```

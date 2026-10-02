@@ -173,10 +173,11 @@ Written in C, commented for someone new to the language.
 7. `core/term.h` / `core/term.c` — ANSI render and the SSH pager
 8. `cli/cli.h` / `cli/cli.c` / `cli/main.c` — `--html`, `--term`, argv
 9. `linux/gtk.c` — GTK window
-10. `Makefile` — how `gcc` is invoked
-11. `bin/` — `build`, `test`, `install`
-12. `pkgbuild/` — Arch package, desktop entry, and icon
-13. `fonts/` — iA Writer Mono S (SIL Open Font License 1.1; see `fonts/OFL.txt`)
-14. `examples/colors.toml` — a paste-ready palette
+10. `apple/` — macOS SwiftUI + WKWebView app (`rocks.gurra.omamd`)
+11. `Makefile` — how `gcc` is invoked
+12. `bin/` — `build`, `test`, `install`
+13. `pkgbuild/` — Arch package, desktop entry, and icon
+14. `fonts/` — iA Writer Mono S (SIL Open Font License 1.1; see `fonts/OFL.txt`)
+15. `examples/colors.toml` — a paste-ready palette
 
 The preview and source views use the same iA Writer Mono that omawrite bundles. It is an OFL font: we may bundle and redistribute it with the app; we do not rename it.
