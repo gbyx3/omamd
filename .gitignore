@@ -5,7 +5,7 @@
 *.pkg.tar.*
 *.src.tar.*
 *.o
-omamd
+/omamd
 xcuserdata/
 *.xcuserstate
 .DS_Store
