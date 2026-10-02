@@ -29,4 +29,5 @@ package() {
   /usr/bin/install -Dm644 fonts/iAWriterMonoS-Italic.ttf "$pkgdir/usr/share/omamd/fonts/iAWriterMonoS-Italic.ttf"
   /usr/bin/install -Dm644 fonts/iAWriterMonoS-Bold.ttf "$pkgdir/usr/share/omamd/fonts/iAWriterMonoS-Bold.ttf"
   /usr/bin/install -Dm644 fonts/iAWriterMonoS-BoldItalic.ttf "$pkgdir/usr/share/omamd/fonts/iAWriterMonoS-BoldItalic.ttf"
+  /usr/bin/install -Dm644 examples/colors.toml "$pkgdir/usr/share/omamd/colors.toml"
 }
