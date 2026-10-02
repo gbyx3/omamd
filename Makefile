@@ -9,29 +9,60 @@
 CC      ?= gcc
 PKGS    := gtk+-3.0 webkit2gtk-4.1 fontconfig
 CFLAGS  ?= -std=c11 -Wall -Wextra -g -O2
-CFLAGS  += $(shell pkg-config --cflags $(PKGS))
 LDFLAGS ?=
+HAVE_GTK := $(shell pkg-config --exists gtk+-3.0 webkit2gtk-4.1 fontconfig 2>/dev/null && echo yes)
+ifeq ($(HAVE_GTK),yes)
+CFLAGS  += $(shell pkg-config --cflags $(PKGS))
 LDLIBS  := $(shell pkg-config --libs $(PKGS))
+else
+LDLIBS  :=
+endif
 
-SRC      := src/main.c src/markdown.c src/term.c src/theme.c
+SRC      := src/main.c src/markdown.c src/term.c src/theme.c src/html.c
 BUILDDIR := build
 BIN      := $(BUILDDIR)/omamd
 
+CORE_SRC := src/core_smoke.c src/markdown.c src/theme.c src/html.c
+COREBIN  := $(BUILDDIR)/omamd-html
+
 PREFIX ?= $(HOME)/.local
 
-.PHONY: all clean test install
+.PHONY: all clean test test-core test-gtk install
 
 all: $(BIN)
 
-$(BIN): $(SRC) src/markdown.h src/term.h src/theme.h
+$(BIN): $(SRC) src/markdown.h src/term.h src/theme.h src/html.h
 	mkdir -p $(BUILDDIR)
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS) $(LDLIBS)
+
+$(COREBIN): $(CORE_SRC) src/markdown.h src/theme.h src/html.h
+	mkdir -p $(BUILDDIR)
+	$(CC) -std=c11 -Wall -Wextra -g -O2 -o $@ $(CORE_SRC)
 
 clean:
 	rm -rf $(BUILDDIR)
 
-# Smoke-test the parser without opening a window.
-test: $(BIN)
+# Parser + page wrapper, no GTK.  This is what `make test` runs on a Mac.
+test-core: $(COREBIN)
+	$(COREBIN) examples/welcome.md | grep -q '<h1>'
+	$(COREBIN) examples/welcome.md | grep -q '<code>'
+	$(COREBIN) examples/welcome.md | grep -q '<table>'
+	$(COREBIN) examples/welcome.md | grep -q '<input type="checkbox"'
+	$(COREBIN) examples/security.md | grep -q 'href="https://example.com/ok"'
+	$(COREBIN) examples/security.md | grep -q 'src="https://example.com/pix.png"'
+	! $(COREBIN) examples/security.md | grep -q 'javascript:'
+	! $(COREBIN) examples/security.md | grep -q 'file:///etc/passwd'
+	! $(COREBIN) examples/security.md | grep -q 'data:text/html'
+	! $(COREBIN) examples/security.md | grep -q 'src="/etc/passwd"'
+	$(COREBIN) --theme examples/colors.toml examples/welcome.md | grep -q '#1a1b26'
+	$(COREBIN) --theme examples/colors.toml examples/welcome.md | grep -q '#c0caf5'
+	$(COREBIN) --theme /no/such/omamd-theme.toml examples/welcome.md | grep -q '<h1>'
+	$(COREBIN) examples/welcome.md | grep -q '@font-face'
+	$(COREBIN) examples/welcome.md | grep -q 'file://'
+	@echo "ok (core)"
+
+# Full binary, including --term.  Needs gtk3 + webkit2gtk.
+test-gtk: $(BIN)
 	$(BIN) --html examples/welcome.md | grep -q '<h1>'
 	$(BIN) --html examples/welcome.md | grep -q '<code>'
 	$(BIN) --html examples/welcome.md | grep -q '<table>'
@@ -47,7 +78,12 @@ test: $(BIN)
 	$(BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#1a1b26'
 	$(BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#c0caf5'
 	$(BIN) --theme /no/such/omamd-theme.toml --html examples/welcome.md | grep -q '<h1>'
-	@echo "ok"
+	@echo "ok (gtk)"
+
+test: test-core
+ifeq ($(HAVE_GTK),yes)
+test: test-gtk
+endif
 
 install: $(BIN) pkgbuild/omamd.desktop pkgbuild/omamd.svg
 	install -Dm755 $(BIN) $(DESTDIR)$(PREFIX)/bin/omamd

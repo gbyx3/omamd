@@ -31,6 +31,7 @@
  *   and structs.  GTK is the C toolkit that already looks like Omarchy.
  */
 
+#include "html.h"
 #include "markdown.h"
 #include "term.h"
 #include "theme.h"
@@ -303,40 +304,6 @@ add:
     }
 }
 
-static void append_bundled_fonts(GString *s)
-{
-    static const struct {
-        const char *file;
-        const char *style;
-        const char *weight;
-    } faces[] = {
-        { "iAWriterMonoS-Regular.ttf", "normal", "400" },
-        { "iAWriterMonoS-Italic.ttf", "italic", "400" },
-        { "iAWriterMonoS-Bold.ttf", "normal", "700" },
-        { "iAWriterMonoS-BoldItalic.ttf", "italic", "700" },
-    };
-    size_t i;
-
-    if (!g_font_dir[0])
-        return;
-    for (i = 0; i < sizeof(faces) / sizeof(faces[0]); i++) {
-        char path[4400];
-        char *uri;
-        snprintf(path, sizeof(path), "%s/%s", g_font_dir, faces[i].file);
-        uri = g_filename_to_uri(path, NULL, NULL);
-        if (!uri)
-            continue;
-        g_string_append(s, "@font-face{font-family:\"iA Writer Mono S\";font-style:");
-        g_string_append(s, faces[i].style);
-        g_string_append(s, ";font-weight:");
-        g_string_append(s, faces[i].weight);
-        g_string_append(s, ";src:url('");
-        g_string_append(s, uri);
-        g_string_append(s, "') format('truetype');font-display:swap;}");
-        g_free(uri);
-    }
-}
-
 static int ends_with_ci(const char *s, const char *suffix)
 {
     size_t ns = strlen(s);
@@ -359,104 +326,6 @@ static int is_markdown_path(const char *path)
            ends_with_ci(path, ".markdown") ||
            ends_with_ci(path, ".mdown") ||
            ends_with_ci(path, ".txt");
-}
-
-/* ---------------------------------------------------------------
- * Palette → CSS
- *
- * theme.c picks a colors.toml (or the built-in default) and fills
- * a Palette.  We turn those hex values into CSS variables so the
- * preview, the source view, and --html share one sheet.
- * --------------------------------------------------------------- */
-
-static char *build_css(const Palette *p)
-{
-    char *css;
-    /* sizeof a string literal includes the '\0'.  We size generously
-     * so snprintf cannot truncate the sheet. */
-    const size_t cap = 8192;
-    css = malloc(cap);
-    if (!css)
-        return NULL;
-
-    snprintf(css, cap,
-        ":root {\n"
-        "  --bg: %s;\n"
-        "  --fg: %s;\n"
-        "  --muted: %s;\n"
-        "  --accent: %s;\n"
-        "  --code-bg: %s;\n"
-        "  --surface: %s;\n"
-        "  --sel: %s;\n"
-        "}\n"
-        "html, body {\n"
-        "  background: var(--bg);\n"
-        "  color: var(--fg);\n"
-        "  margin: 0;\n"
-        "}\n"
-        "body {\n"
-        "  font-family: \"iA Writer Mono S\", ui-monospace, monospace;\n"
-        "  font-size: 16px;\n"
-        "  line-height: 1.7;\n"
-        "}\n"
-        "article.md {\n"
-        "  max-width: 42rem;\n"
-        "  margin: 0 auto;\n"
-        "  padding: 2.4rem 4.2rem 4rem 1.4rem;\n"
-        "}\n"
-        "h1, h2, h3, h4, h5, h6 {\n"
-        "  line-height: 1.25;\n"
-        "  font-weight: 700;\n"
-        "  margin: 1.6em 0 0.5em;\n"
-        "}\n"
-        "h1 { font-size: 2.0em; margin-top: 0; }\n"
-        "h2 { font-size: 1.45em; padding-bottom: 0.2em;\n"
-        "     border-bottom: 1px solid var(--surface); }\n"
-        "h3 { font-size: 1.18em; }\n"
-        "p, ul, ol, blockquote, table, pre { margin: 0.85em 0; }\n"
-        "a { color: var(--accent); text-decoration: none; }\n"
-        "a:hover { text-decoration: underline; }\n"
-        "code {\n"
-        "  font-family: \"iA Writer Mono S\", ui-monospace, monospace;\n"
-        "  font-size: 0.92em;\n"
-        "  background: var(--code-bg);\n"
-        "  padding: 0.12em 0.38em;\n"
-        "  border-radius: 4px;\n"
-        "}\n"
-        "pre {\n"
-        "  background: var(--code-bg);\n"
-        "  border: 1px solid var(--surface);\n"
-        "  border-radius: 8px;\n"
-        "  padding: 0.9em 1em;\n"
-        "  overflow: auto;\n"
-        "}\n"
-        "pre code { background: none; padding: 0; font-size: 0.86em; }\n"
-        "blockquote {\n"
-        "  border-left: 3px solid var(--accent);\n"
-        "  margin-left: 0;\n"
-        "  padding: 0.15em 0 0.15em 1em;\n"
-        "  color: var(--muted);\n"
-        "}\n"
-        "hr {\n"
-        "  border: 0;\n"
-        "  border-top: 1px solid var(--surface);\n"
-        "  margin: 1.8em 0;\n"
-        "}\n"
-        "table { border-collapse: collapse; width: 100%%; }\n"
-        "th, td {\n"
-        "  border: 1px solid var(--surface);\n"
-        "  padding: 0.4em 0.7em;\n"
-        "  text-align: left;\n"
-        "}\n"
-        "th { background: var(--code-bg); }\n"
-        "tr:nth-child(even) td { background: color-mix(in srgb, var(--surface) 35%%, transparent); }\n"
-        "img { max-width: 100%%; height: auto; border-radius: 6px; }\n"
-        "li > p { margin: 0.25em 0; }\n"
-        "li:has(> input[type=checkbox]) { list-style: none; margin-left: -1.3em; }\n"
-        "input[type=checkbox] { margin-right: 0.45em; }\n"
-        "::selection { background: var(--sel); }\n",
-        p->bg, p->fg, p->muted, p->accent, p->code_bg, p->surface, p->sel);
-    return css;
 }
 
 /* GTK's own stylesheet for the chrome we draw: a chrome-less window
@@ -515,39 +384,6 @@ static void apply_ui_css(App *app, const Palette *p)
             GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
     gtk_css_provider_load_from_data(app->ui_css, css, -1, NULL);
-}
-
-static void escape_html_str(GString *out, const char *s)
-{
-    for (; s && *s; s++) {
-        switch (*s) {
-        case '&':  g_string_append(out, "&amp;");  break;
-        case '<':  g_string_append(out, "&lt;");   break;
-        case '>':  g_string_append(out, "&gt;");   break;
-        case '"':  g_string_append(out, "&quot;"); break;
-        default:   g_string_append_c(out, *s);     break;
-        }
-    }
-}
-
-/* Wrap a body fragment in a full HTML document.  GString is GLib's
- * growable string — the same idea as Buf in markdown.c, already
- * written for us because we linked GTK. */
-static char *wrap_document(const char *title, const char *css, const char *body)
-{
-    GString *s = g_string_new(NULL);
-    g_string_append(s,
-        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-        "<title>");
-    escape_html_str(s, title ? title : "omamd");
-    g_string_append(s, "</title><style>");
-    append_bundled_fonts(s);
-    g_string_append(s, css ? css : "");
-    g_string_append(s, "</style></head><body><article class=\"md\">");
-    g_string_append(s, body ? body : "");
-    g_string_append(s, "</article><div id=\"omamd-end\"></div></body></html>");
-    return g_string_free(s, FALSE); /* FALSE = hand the bytes to the caller */
 }
 
 /* The page shown when nothing is open yet. */
@@ -695,7 +531,8 @@ static void app_render_text(App *app, const char *md, size_t n, const char *titl
         show_error(app, "Out of memory while converting Markdown.");
         return;
     }
-    page = wrap_document(title, app->css, fragment);
+    page = omamd_document(title, app->css, fragment,
+                          g_font_dir[0] ? g_font_dir : NULL);
     free(fragment);
     if (!page) {
         show_error(app, "Out of memory while wrapping HTML.");
@@ -704,7 +541,7 @@ static void app_render_text(App *app, const char *md, size_t n, const char *titl
 
     webkit_web_view_load_html(WEBKIT_WEB_VIEW(app->web_view), page,
                               app->base_uri ? app->base_uri : "about:blank");
-    g_free(page);
+    free(page);
 
     buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(app->text_view));
     gtk_text_buffer_set_text(buf, md ? md : "", (gint)n);
@@ -1303,7 +1140,7 @@ static gboolean app_apply_theme_now(gpointer user_data)
     if (kind != THEME_KIND_NONE)
         palette_load_file(&pal, colors_path);
 
-    css = build_css(&pal);
+    css = omamd_css(&pal);
     if (!css)
         return G_SOURCE_REMOVE;
 
@@ -1547,8 +1384,9 @@ static int run_html_mode(const char *path)
         return 1;
     }
     palette_load(&pal, g_theme_arg);
-    css = build_css(&pal);
-    page = wrap_document(title, css, fragment);
+    css = omamd_css(&pal);
+    page = omamd_document(title, css, fragment,
+                          g_font_dir[0] ? g_font_dir : NULL);
     free(fragment);
     free(css);
     if (!page) {
@@ -1556,7 +1394,7 @@ static int run_html_mode(const char *path)
         return 1;
     }
     fputs(page, stdout);
-    g_free(page);
+    free(page);
     return 0;
 }
 

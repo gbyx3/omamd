@@ -53,25 +53,24 @@ Omarchy. `examples/colors.toml` is the template.
 
 | Function | Move to |
 |---|---|
-| `build_css`, `wrap_document`, `escape_html_str` | `core/html.c` (plain C, no GLib) |
 | `read_entire_file`, stdin, `is_markdown_path` | `core/util.c` |
 | `run_html_mode`, `run_term_mode`, argv parsing | `cli/main.c` |
-| `append_bundled_fonts` / fontconfig | core takes a font-dir or `@font-face` CSS; fontconfig stays Linux-only |
+| `load_app_fonts` / fontconfig | Linux only; `omamd_document()` takes a font directory |
 | Window, WebKitGTK, GFileMonitor, drag-drop, Hyprland chrome | `linux/gtk.c` |
 | `apply_ui_css` (GTK widget chrome) | Linux only |
 
-`make test` currently links WebKitGTK. After the CLI split it compiles
-with `cc` on macOS.
+`make test-core` compiles markdown + theme + html with `cc` (no GTK).
+`make test` runs that, and the GTK binary too if pkg-config finds it.
 
 ## PRs (in order)
 
 Each PR leaves the Omarchy GTK app working.
 
-### PR 1 — HTML document in core
+### PR 1 — HTML document in core — done on this branch
 
-Move `build_css` + `wrap_document` into `core/html.c` using the `Buf`
-pattern from `markdown.c` (no `GString`). GTK `main.c` and `--html`
-call it. Tests still run through the GTK binary.
+`src/html.c`: `omamd_css()` + `omamd_document()`. GTK `main.c` and
+`src/core_smoke.c` (`make test-core`) call it. Fonts are a directory
+argument; fontconfig stays in `main.c`.
 
 ### PR 2 — CLI without GTK
 

@@ -167,12 +167,13 @@ Written in C, commented for someone new to the language.
 1. `src/markdown.h` — the converter’s public function
 2. `src/markdown.c` — Markdown → HTML
 3. `src/theme.h` / `src/theme.c` — `colors.toml` lookup and palette
-4. `src/main.c` — window, file loading, CSS from the palette
-5. `src/term.h` / `src/term.c` — ANSI render and the SSH pager
-6. `Makefile` — how `gcc` is invoked
-7. `bin/` — `build`, `test`, `install`
-8. `pkgbuild/` — Arch package, desktop entry, and icon
-9. `fonts/` — iA Writer Mono S (SIL Open Font License 1.1; see `fonts/OFL.txt`)
-10. `examples/colors.toml` — a paste-ready palette
+4. `src/html.h` / `src/html.c` — palette + fragment → full HTML page
+5. `src/main.c` — window, file loading
+6. `src/term.h` / `src/term.c` — ANSI render and the SSH pager
+7. `Makefile` — how `gcc` is invoked
+8. `bin/` — `build`, `test`, `install`
+9. `pkgbuild/` — Arch package, desktop entry, and icon
+10. `fonts/` — iA Writer Mono S (SIL Open Font License 1.1; see `fonts/OFL.txt`)
+11. `examples/colors.toml` — a paste-ready palette
 
 The preview and source views use the same iA Writer Mono that omawrite bundles. It is an OFL font: we may bundle and redistribute it with the app; we do not rename it.
