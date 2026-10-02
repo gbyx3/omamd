@@ -15,9 +15,9 @@
  *
  * The life of this program:
  *
- *   1. Look at the command-line arguments.
- *   2. If the user asked for --html, convert and print, then exit.
- *      No window.  This is how we test the parser from a terminal.
+ *   1. Look at the command-line arguments (cli.c).
+ *   2. If the user asked for --html or --term, handle that and exit.
+ *      Those paths also live in the GTK-free binary (cli_main.c).
  *   3. Otherwise gtk_init() talks to the Wayland/X11 display.
  *   4. Build the window, connect signals, load a file if one was given.
  *   5. gtk_main() sits in a loop: wait for an event, handle it, repeat
@@ -31,29 +31,19 @@
  *   and structs.  GTK is the C toolkit that already looks like Omarchy.
  */
 
+#include "cli.h"
+#include "fonts.h"
 #include "html.h"
 #include "markdown.h"
-#include "term.h"
 #include "theme.h"
+#include "util.h"
 
-#include <ctype.h>
 #include <fontconfig/fontconfig.h>
 #include <gtk/gtk.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <webkit2/webkit2.h>
-
-/* A #define is a name the preprocessor pastes in before compiling.
- * OMAMD_VERSION is not a variable; it is literally the characters "0.1". */
-#define OMAMD_VERSION "0.1"
-
-/* Refuse to slurp a multi-gigabyte "markdown" file into RAM. */
-#define OMAMD_MAX_FILE_BYTES (32u * 1024u * 1024u)
-
-/* Directory that holds the bundled iA Writer Mono S files, or "". */
-static char g_font_dir[4200];
 
 /* --theme PATH from the command line, or NULL.  theme.c also reads
  * OMAMD_THEME, the Omarchy live file, and ~/.config/omamd/colors.toml. */
@@ -98,160 +88,10 @@ typedef struct {
     guint theme_timeout;
 } App;
 
-/* ---------------------------------------------------------------
- * Tiny helpers: files and strings
- * ---------------------------------------------------------------
- *
- * fopen / fread / fclose is the classic C way to read a file.
- * GTK also has g_file_get_contents(); we use the C version here
- * so you can see the pattern, then free() the result.
- */
-
-static char *read_entire_file(const char *path, size_t *out_len)
-{
-    FILE *f;
-    long size;
-    char *buf;
-    size_t got;
-
-    /* "rb" = read, binary.  Binary so Windows \r\n is not rewritten;
-     * the parser already understands both kinds of line ending. */
-    f = fopen(path, "rb");
-    if (!f)
-        return NULL;
-
-    /* SEEK_END + ftell() asks "how many bytes is this file?"
-     * It is fine for normal files; it is not how you read a pipe. */
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return NULL;
-    }
-    size = ftell(f);
-    if (size < 0 || (unsigned long)size > OMAMD_MAX_FILE_BYTES) {
-        fclose(f);
-        return NULL;
-    }
-    rewind(f); /* same as fseek(f, 0, SEEK_SET): go back to byte 0 */
-
-    buf = malloc((size_t)size + 1);
-    if (!buf) {
-        fclose(f);
-        return NULL;
-    }
-    got = fread(buf, 1, (size_t)size, f);
-    fclose(f);
-    buf[got] = '\0';
-    if (out_len)
-        *out_len = got;
-    return buf;
-}
-
-/* Read stdin until EOF.  Used by `omamd --html < notes.md`. */
-static char *read_entire_stdin(size_t *out_len)
-{
-    char *buf = NULL;
-    size_t len = 0;
-    size_t cap = 0;
-    char tmp[4096];
-    size_t n;
-
-    while ((n = fread(tmp, 1, sizeof(tmp), stdin)) > 0) {
-        if (n > OMAMD_MAX_FILE_BYTES || len > OMAMD_MAX_FILE_BYTES - n) {
-            free(buf);
-            return NULL;
-        }
-        if (len + n + 1 > cap) {
-            size_t new_cap = cap ? cap * 2 : 8192;
-            char *grown;
-            while (new_cap < len + n + 1)
-                new_cap *= 2;
-            grown = realloc(buf, new_cap);
-            if (!grown) {
-                free(buf);
-                return NULL;
-            }
-            buf = grown;
-            cap = new_cap;
-        }
-        memcpy(buf + len, tmp, n);
-        len += n;
-    }
-    if (!buf) {
-        buf = malloc(1);
-        if (!buf)
-            return NULL;
-    }
-    buf[len] = '\0';
-    if (out_len)
-        *out_len = len;
-    return buf;
-}
-
-static char *dup_str(const char *s)
-{
-    size_t n;
-    char *out;
-    if (!s)
-        return NULL;
-    n = strlen(s);
-    out = malloc(n + 1);
-    if (!out)
-        return NULL;
-    memcpy(out, s, n + 1);
-    return out;
-}
-
-static char *dir_of(const char *path)
-{
-    const char *slash = strrchr(path, '/');
-    char *dir;
-    size_t n;
-
-    if (!slash)
-        return dup_str(".");
-    if (slash == path)
-        return dup_str("/");
-    n = (size_t)(slash - path);
-    dir = malloc(n + 1);
-    if (!dir)
-        return NULL;
-    memcpy(dir, path, n);
-    dir[n] = '\0';
-    return dir;
-}
-
-/*
- * iA Writer Mono S is bundled under the SIL Open Font License 1.1
- * (see fonts/OFL.txt).  We register the files with fontconfig so GTK
- * and WebKit can see the family without a system install, then look
- * next to the binary, in ~/.local/share/omamd/fonts, and in
- * /usr/share/omamd/fonts.
- */
-static int font_dir_ok(const char *dir)
-{
-    char path[4200];
-    if (!dir || !dir[0])
-        return 0;
-    snprintf(path, sizeof(path), "%s/iAWriterMonoS-Regular.ttf", dir);
-    return g_file_test(path, G_FILE_TEST_IS_REGULAR);
-}
-
-static int adopt_font_dir(const char *dir)
-{
-    char *real;
-    if (!font_dir_ok(dir))
-        return 0;
-    real = realpath(dir, NULL);
-    if (real) {
-        snprintf(g_font_dir, sizeof(g_font_dir), "%s", real);
-        free(real);
-    } else {
-        snprintf(g_font_dir, sizeof(g_font_dir), "%s", dir);
-    }
-    return 1;
-}
-
-static void load_app_fonts(void)
+/* Register the bundled faces with fontconfig so GtkTextView can
+ * use "iA Writer Mono S" by family name.  The HTML preview loads
+ * the same files via @font-face in omamd_document(). */
+static void register_app_fonts(void)
 {
     static const char *files[] = {
         "iAWriterMonoS-Regular.ttf",
@@ -259,73 +99,16 @@ static void load_app_fonts(void)
         "iAWriterMonoS-Bold.ttf",
         "iAWriterMonoS-BoldItalic.ttf",
     };
-    const char *env = getenv("OMAMD_FONTDIR");
-    const char *home = getenv("HOME");
-    char buf[4200];
-    char exe[4096];
-    ssize_t n;
+    const char *dir = omamd_font_dir();
+    char buf[4400];
     size_t i;
 
-    g_font_dir[0] = '\0';
-    if (env && adopt_font_dir(env))
-        goto add;
-
-    n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-    if (n > 0) {
-        char *slash;
-        exe[n] = '\0';
-        slash = strrchr(exe, '/');
-        if (slash) {
-            *slash = '\0';
-            snprintf(buf, sizeof(buf), "%s/../fonts", exe);
-            if (adopt_font_dir(buf))
-                goto add;
-            snprintf(buf, sizeof(buf), "%s/fonts", exe);
-            if (adopt_font_dir(buf))
-                goto add;
-        }
-    }
-
-    if (home) {
-        snprintf(buf, sizeof(buf), "%s/.local/share/omamd/fonts", home);
-        if (adopt_font_dir(buf))
-            goto add;
-    }
-    if (adopt_font_dir("/usr/share/omamd/fonts"))
-        goto add;
-    if (adopt_font_dir("fonts"))
-        goto add;
-    return;
-
-add:
+    if (!dir[0])
+        return;
     for (i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
-        snprintf(buf, sizeof(buf), "%s/%s", g_font_dir, files[i]);
+        snprintf(buf, sizeof(buf), "%s/%s", dir, files[i]);
         FcConfigAppFontAddFile(NULL, (const FcChar8 *)buf);
     }
-}
-
-static int ends_with_ci(const char *s, const char *suffix)
-{
-    size_t ns = strlen(s);
-    size_t nt = strlen(suffix);
-    size_t i;
-    if (nt > ns)
-        return 0;
-    for (i = 0; i < nt; i++) {
-        unsigned char a = (unsigned char)s[ns - nt + i];
-        unsigned char b = (unsigned char)suffix[i];
-        if (tolower(a) != tolower(b))
-            return 0;
-    }
-    return 1;
-}
-
-static int is_markdown_path(const char *path)
-{
-    return ends_with_ci(path, ".md") ||
-           ends_with_ci(path, ".markdown") ||
-           ends_with_ci(path, ".mdown") ||
-           ends_with_ci(path, ".txt");
 }
 
 /* GTK's own stylesheet for the chrome we draw: a chrome-less window
@@ -532,7 +315,7 @@ static void app_render_text(App *app, const char *md, size_t n, const char *titl
         return;
     }
     page = omamd_document(title, app->css, fragment,
-                          g_font_dir[0] ? g_font_dir : NULL);
+                          omamd_font_dir()[0] ? omamd_font_dir() : NULL);
     free(fragment);
     if (!page) {
         show_error(app, "Out of memory while wrapping HTML.");
@@ -565,7 +348,7 @@ static void app_show_welcome(App *app)
     g_free(app->base_uri);
     app->base_uri = NULL;
     free(app->source);
-    app->source = dup_str(WELCOME_MD);
+    app->source = omamd_dup_str(WELCOME_MD);
     app_render_text(app, WELCOME_MD, strlen(WELCOME_MD), "welcome");
 }
 
@@ -625,7 +408,7 @@ static void app_watch(App *app, const char *path)
 static int app_load_path(App *app, const char *path, int follow)
 {
     size_t n = 0;
-    char *md = read_entire_file(path, &n);
+    char *md = omamd_read_file(path, &n);
     char *dir;
     const char *slash;
     const char *title;
@@ -646,13 +429,13 @@ static int app_load_path(App *app, const char *path, int follow)
      * leave `path` dangling (and the window title as garbage). */
     if (path != app->path) {
         free(app->path);
-        app->path = dup_str(path);
+        app->path = omamd_dup_str(path);
         path = app->path;
     }
 
     g_free(app->base_uri);
     free(app->doc_dir);
-    dir = dir_of(path);
+    dir = omamd_dir_of(path);
     app->doc_dir = dir ? realpath(dir, NULL) : NULL;
     app->base_uri = g_filename_to_uri(dir, NULL, NULL);
     /* A directory URI must end in / so "pic.png" resolves next to the file. */
@@ -884,7 +667,7 @@ static gboolean on_decide_policy(WebKitWebView *web_view,
             GError *err = NULL;
             char *path = g_filename_from_uri(uri, NULL, &err);
             g_clear_error(&err);
-            if (path && is_markdown_path(path) &&
+            if (path && omamd_is_markdown_path(path) &&
                 app->doc_dir && path_is_under_dir(path, app->doc_dir)) {
                 app_load_path(app, path, 0);
                 g_free(path);
@@ -1332,200 +1115,46 @@ static void build_ui(App *app)
     app_watch_theme(app);
 }
 
-static void usage(FILE *out)
-{
-    fprintf(out,
-            "omamd %s — a small Markdown viewer\n"
-            "\n"
-            "Usage:\n"
-            "  omamd [file.md]         open in a window\n"
-            "  omamd --term [file.md]  render in the terminal (SSH)\n"
-            "  omamd --html [file.md]  Markdown to HTML on stdout\n"
-            "  omamd --theme FILE.toml  use this colors.toml\n"
-            "  omamd --help            this text\n"
-            "\n"
-            "Keys:  Ctrl+O open   Ctrl+R reload   Ctrl+1 preview\n"
-            "       Ctrl+2 source Ctrl+Q quit     F5 reload\n"
-            "Term:  j/k scroll    g/G top/end     f follow  q quit\n",
-            OMAMD_VERSION);
-}
-
-static int run_html_mode(const char *path)
-{
-    size_t n = 0;
-    char *md;
-    char *fragment;
-    char *page;
-    Palette pal;
-    char *css;
-    const char *title = "omamd";
-
-    if (path) {
-        const char *slash;
-        md = read_entire_file(path, &n);
-        if (!md) {
-            fprintf(stderr, "omamd: cannot read %s\n", path);
-            return 1;
-        }
-        slash = strrchr(path, '/');
-        title = slash ? slash + 1 : path;
-    } else {
-        md = read_entire_stdin(&n);
-        if (!md) {
-            fprintf(stderr, "omamd: out of memory\n");
-            return 1;
-        }
-    }
-
-    fragment = markdown_to_html(md, n);
-    free(md);
-    if (!fragment) {
-        fprintf(stderr, "omamd: out of memory\n");
-        return 1;
-    }
-    palette_load(&pal, g_theme_arg);
-    css = omamd_css(&pal);
-    page = omamd_document(title, css, fragment,
-                          g_font_dir[0] ? g_font_dir : NULL);
-    free(fragment);
-    free(css);
-    if (!page) {
-        fprintf(stderr, "omamd: out of memory\n");
-        return 1;
-    }
-    fputs(page, stdout);
-    free(page);
-    return 0;
-}
-
-static unsigned rgb_parse(const char *s)
-{
-    unsigned r = 0xcd, g = 0xd6, b = 0xf4;
-    if (!s || s[0] != '#')
-        return (r << 16) | (g << 8) | b;
-    if (s[1] && s[2] && s[3] && s[4] == '\0') {
-        if (sscanf(s, "#%1x%1x%1x", &r, &g, &b) == 3)
-            return (r * 17u << 16) | (g * 17u << 8) | (b * 17u);
-    }
-    if (sscanf(s, "#%02x%02x%02x", &r, &g, &b) == 3)
-        return (r << 16) | (g << 8) | b;
-    return (0xcdu << 16) | (0xd6u << 8) | 0xf4u;
-}
-
-static char *term_reread(const char *path, size_t *n)
-{
-    return read_entire_file(path, n);
-}
-
-static int no_display(void)
-{
-    const char *w = getenv("WAYLAND_DISPLAY");
-    const char *d = getenv("DISPLAY");
-    return (w == NULL || w[0] == '\0') && (d == NULL || d[0] == '\0');
-}
-
-static int run_term_mode(const char *path)
-{
-    size_t n = 0;
-    char *md;
-    Palette pal;
-    TermPalette tp;
-    int rc;
-    const char *watch = path;
-
-    if (path) {
-        md = read_entire_file(path, &n);
-        if (!md) {
-            fprintf(stderr, "omamd: cannot read %s\n", path);
-            return 1;
-        }
-    } else {
-        md = read_entire_stdin(&n);
-        if (!md) {
-            fprintf(stderr, "omamd: out of memory\n");
-            return 1;
-        }
-        watch = NULL;
-    }
-
-    palette_load(&pal, g_theme_arg);
-    memset(&tp, 0, sizeof(tp));
-    tp.color = getenv("NO_COLOR") == NULL;
-    tp.fg = rgb_parse(pal.fg);
-    tp.bg = rgb_parse(pal.bg);
-    tp.accent = rgb_parse(pal.accent);
-    tp.muted = rgb_parse(pal.muted);
-    tp.code_bg = rgb_parse(pal.code_bg);
-
-    rc = term_run(watch, md, n, &tp, watch ? term_reread : NULL);
-    free(md);
-    return rc;
-}
-
 int main(int argc, char **argv)
 {
-    int html_mode = 0;
-    int term_mode = 0;
-    const char *path = NULL;
-    int i;
+    OmamdCli o;
     App *app;
 
-    for (i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            usage(stdout);
-            return 0;
-        }
-        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
-            printf("omamd %s\n", OMAMD_VERSION);
-            return 0;
-        }
-        if (strcmp(argv[i], "--html") == 0) {
-            html_mode = 1;
-            continue;
-        }
-        if (strcmp(argv[i], "--term") == 0 || strcmp(argv[i], "-t") == 0) {
-            term_mode = 1;
-            continue;
-        }
-        if (strcmp(argv[i], "--theme") == 0) {
-            if (i + 1 >= argc || argv[i + 1][0] == '-') {
-                fprintf(stderr, "omamd: --theme needs a file path\n");
-                usage(stderr);
-                return 2;
-            }
-            g_theme_arg = argv[++i];
-            continue;
-        }
-        if (argv[i][0] == '-') {
-            fprintf(stderr, "omamd: unknown option %s\n", argv[i]);
-            usage(stderr);
-            return 2;
-        }
-        path = argv[i];
+    if (omamd_cli_parse(argc, argv, &o) != 0) {
+        omamd_cli_usage(stderr);
+        return 2;
+    }
+    if (o.help) {
+        omamd_cli_usage(stdout);
+        return 0;
+    }
+    if (o.version) {
+        printf("omamd %s\n", OMAMD_VERSION);
+        return 0;
     }
 
-    load_app_fonts();
+    g_theme_arg = o.theme;
+    omamd_init_fonts(argv[0]);
+    register_app_fonts();
 
-    if (html_mode)
-        return run_html_mode(path);
-    if (!term_mode && !html_mode && no_display())
-        term_mode = 1;
-    if (term_mode)
-        return run_term_mode(path);
+    if (o.html)
+        return omamd_run_html(o.path, o.theme);
+    if (o.term || omamd_no_display())
+        return omamd_run_term(o.path, o.theme);
 
     /* gtk_init_check talks to the display.  If the socket is gone
      * (SSH without forwarding, empty DISPLAY), open the pager
      * instead of dying with "cannot open display". */
     if (!gtk_init_check(&argc, &argv))
-        return run_term_mode(path);
+        return omamd_run_term(o.path, o.theme);
 
     app = calloc(1, sizeof(App));
     if (!app)
         return 1;
     build_ui(app);
 
-    if (path) {
-        if (!app_load_path(app, path, 0))
+    if (o.path) {
+        if (!app_load_path(app, o.path, 0))
             app_show_welcome(app);
     } else {
         app_show_welcome(app);

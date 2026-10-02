@@ -5,10 +5,12 @@
 #
 # pkg-config asks the system "what compiler flags does GTK need?"
 # so we do not hard-code include paths that change between machines.
+# The CLI (--html / --term) compiles without those libraries.
 
 CC      ?= gcc
 PKGS    := gtk+-3.0 webkit2gtk-4.1 fontconfig
 CFLAGS  ?= -std=c11 -Wall -Wextra -g -O2
+CLI_CFLAGS ?= -std=c11 -Wall -Wextra -g -O2
 LDFLAGS ?=
 HAVE_GTK := $(shell pkg-config --exists gtk+-3.0 webkit2gtk-4.1 fontconfig 2>/dev/null && echo yes)
 ifeq ($(HAVE_GTK),yes)
@@ -18,69 +20,70 @@ else
 LDLIBS  :=
 endif
 
-SRC      := src/main.c src/markdown.c src/term.c src/theme.c src/html.c
 BUILDDIR := build
-BIN      := $(BUILDDIR)/omamd
+COMMON   := src/cli.c src/util.c src/fonts.c src/markdown.c src/theme.c src/html.c src/term.c
+HDRS     := src/cli.h src/util.h src/fonts.h src/markdown.h src/theme.h src/html.h src/term.h
 
-CORE_SRC := src/core_smoke.c src/markdown.c src/theme.c src/html.c
-COREBIN  := $(BUILDDIR)/omamd-html
+ifeq ($(HAVE_GTK),yes)
+BIN      := $(BUILDDIR)/omamd
+CLI_BIN  := $(BUILDDIR)/omamd-cli
+else
+BIN      := $(BUILDDIR)/omamd
+CLI_BIN  := $(BUILDDIR)/omamd
+endif
 
 PREFIX ?= $(HOME)/.local
 
-.PHONY: all clean test test-core test-gtk install
+.PHONY: all clean test test-cli test-gtk install
 
 all: $(BIN)
+ifeq ($(HAVE_GTK),yes)
+all: $(CLI_BIN)
+endif
 
-$(BIN): $(SRC) src/markdown.h src/term.h src/theme.h src/html.h
+$(CLI_BIN): src/cli_main.c $(COMMON) $(HDRS)
 	mkdir -p $(BUILDDIR)
-	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CLI_CFLAGS) -o $@ src/cli_main.c $(COMMON)
 
-$(COREBIN): $(CORE_SRC) src/markdown.h src/theme.h src/html.h
+ifeq ($(HAVE_GTK),yes)
+$(BIN): src/main.c $(COMMON) $(HDRS) src/html.h
 	mkdir -p $(BUILDDIR)
-	$(CC) -std=c11 -Wall -Wextra -g -O2 -o $@ $(CORE_SRC)
+	$(CC) $(CFLAGS) -o $@ src/main.c $(COMMON) $(LDFLAGS) $(LDLIBS)
+endif
 
 clean:
 	rm -rf $(BUILDDIR)
 
-# Parser + page wrapper, no GTK.  This is what `make test` runs on a Mac.
-test-core: $(COREBIN)
-	$(COREBIN) examples/welcome.md | grep -q '<h1>'
-	$(COREBIN) examples/welcome.md | grep -q '<code>'
-	$(COREBIN) examples/welcome.md | grep -q '<table>'
-	$(COREBIN) examples/welcome.md | grep -q '<input type="checkbox"'
-	$(COREBIN) examples/security.md | grep -q 'href="https://example.com/ok"'
-	$(COREBIN) examples/security.md | grep -q 'src="https://example.com/pix.png"'
-	! $(COREBIN) examples/security.md | grep -q 'javascript:'
-	! $(COREBIN) examples/security.md | grep -q 'file:///etc/passwd'
-	! $(COREBIN) examples/security.md | grep -q 'data:text/html'
-	! $(COREBIN) examples/security.md | grep -q 'src="/etc/passwd"'
-	$(COREBIN) --theme examples/colors.toml examples/welcome.md | grep -q '#1a1b26'
-	$(COREBIN) --theme examples/colors.toml examples/welcome.md | grep -q '#c0caf5'
-	$(COREBIN) --theme /no/such/omamd-theme.toml examples/welcome.md | grep -q '<h1>'
-	$(COREBIN) examples/welcome.md | grep -q '@font-face'
-	$(COREBIN) examples/welcome.md | grep -q 'file://'
-	@echo "ok (core)"
+# --html and --term, no GTK.  This is `make test` on a Mac.
+test-cli: $(CLI_BIN)
+	$(CLI_BIN) --html examples/welcome.md | grep -q '<h1>'
+	$(CLI_BIN) --html examples/welcome.md | grep -q '<code>'
+	$(CLI_BIN) --html examples/welcome.md | grep -q '<table>'
+	$(CLI_BIN) --html examples/welcome.md | grep -q '<input type="checkbox"'
+	$(CLI_BIN) --html examples/security.md | grep -q 'href="https://example.com/ok"'
+	$(CLI_BIN) --html examples/security.md | grep -q 'src="https://example.com/pix.png"'
+	! $(CLI_BIN) --html examples/security.md | grep -q 'javascript:'
+	! $(CLI_BIN) --html examples/security.md | grep -q 'file:///etc/passwd'
+	! $(CLI_BIN) --html examples/security.md | grep -q 'data:text/html'
+	! $(CLI_BIN) --html examples/security.md | grep -q 'src="/etc/passwd"'
+	$(CLI_BIN) --term examples/welcome.md | grep -q 'Welcome'
+	! $(CLI_BIN) --term examples/welcome.md | grep -q '<h1>'
+	$(CLI_BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#1a1b26'
+	$(CLI_BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#c0caf5'
+	$(CLI_BIN) --theme /no/such/omamd-theme.toml --html examples/welcome.md | grep -q '<h1>'
+	$(CLI_BIN) --html examples/welcome.md | grep -q '@font-face'
+	$(CLI_BIN) --html examples/welcome.md | grep -q 'file://'
+	$(CLI_BIN) --version | grep -q 'omamd'
+	@echo "ok (cli)"
 
-# Full binary, including --term.  Needs gtk3 + webkit2gtk.
+# GTK binary still dispatches --html / --term through cli.c.
 test-gtk: $(BIN)
 	$(BIN) --html examples/welcome.md | grep -q '<h1>'
-	$(BIN) --html examples/welcome.md | grep -q '<code>'
-	$(BIN) --html examples/welcome.md | grep -q '<table>'
-	$(BIN) --html examples/welcome.md | grep -q '<input type="checkbox"'
-	$(BIN) --html examples/security.md | grep -q 'href="https://example.com/ok"'
-	$(BIN) --html examples/security.md | grep -q 'src="https://example.com/pix.png"'
-	! $(BIN) --html examples/security.md | grep -q 'javascript:'
-	! $(BIN) --html examples/security.md | grep -q 'file:///etc/passwd'
-	! $(BIN) --html examples/security.md | grep -q 'data:text/html'
-	! $(BIN) --html examples/security.md | grep -q 'src="/etc/passwd"'
 	$(BIN) --term examples/welcome.md | grep -q 'Welcome'
-	! $(BIN) --term examples/welcome.md | grep -q '<h1>'
 	$(BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#1a1b26'
-	$(BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#c0caf5'
-	$(BIN) --theme /no/such/omamd-theme.toml --html examples/welcome.md | grep -q '<h1>'
 	@echo "ok (gtk)"
 
-test: test-core
+test: test-cli
 ifeq ($(HAVE_GTK),yes)
 test: test-gtk
 endif

@@ -19,7 +19,7 @@ SSH if the environment already uses it: `git@github.com:gbyx3/omamd.git`
 
 ### 2. Dependencies
 
-Need `gcc`, `make`, `pkgconf`, `gtk3`, and `webkit2gtk-4.1`.
+Need `gcc` and `make`. The GTK window also needs `pkgconf`, `gtk3`, and `webkit2gtk-4.1`. `--html` and `--term` build without those.
 
 On **Omarchy** they are already installed. If a check fails:
 
@@ -39,7 +39,7 @@ sudo pacman -S --needed gcc make pkgconf gtk3 webkit2gtk-4.1
 ./bin/build
 ```
 
-Expect `Built …/omamd/build/omamd`. Run `./bin/test` if you want the parser smoke check.
+Expect `Built …/omamd/build/omamd`. Run `./bin/test` if you want the `--html` / `--term` smoke check (no GTK needed).
 
 ### 4. User-local install (no sudo)
 
@@ -168,12 +168,14 @@ Written in C, commented for someone new to the language.
 2. `src/markdown.c` — Markdown → HTML
 3. `src/theme.h` / `src/theme.c` — `colors.toml` lookup and palette
 4. `src/html.h` / `src/html.c` — palette + fragment → full HTML page
-5. `src/main.c` — window, file loading
-6. `src/term.h` / `src/term.c` — ANSI render and the SSH pager
-7. `Makefile` — how `gcc` is invoked
-8. `bin/` — `build`, `test`, `install`
-9. `pkgbuild/` — Arch package, desktop entry, and icon
-10. `fonts/` — iA Writer Mono S (SIL Open Font License 1.1; see `fonts/OFL.txt`)
-11. `examples/colors.toml` — a paste-ready palette
+5. `src/util.h` / `src/util.c` — file and path helpers
+6. `src/cli.h` / `src/cli.c` / `src/cli_main.c` — `--html`, `--term`, argv
+7. `src/main.c` — GTK window
+8. `src/term.h` / `src/term.c` — ANSI render and the SSH pager
+9. `Makefile` — how `gcc` is invoked
+10. `bin/` — `build`, `test`, `install`
+11. `pkgbuild/` — Arch package, desktop entry, and icon
+12. `fonts/` — iA Writer Mono S (SIL Open Font License 1.1; see `fonts/OFL.txt`)
+13. `examples/colors.toml` — a paste-ready palette
 
 The preview and source views use the same iA Writer Mono that omawrite bundles. It is an OFL font: we may bundle and redistribute it with the app; we do not rename it.
