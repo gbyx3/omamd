@@ -1,0 +1,35 @@
+# omamd palette — same keys as an Omarchy theme's colors.toml.
+#
+# Copy this file (or paste one from an Omarchy machine) to:
+#   ~/.config/omamd/colors.toml
+# or pass it in:
+#   omamd --theme examples/colors.toml notes.md
+#   OMAMD_THEME=/path/to/colors.toml omamd notes.md
+#
+# Lines starting with # are ignored.  Only these keys are read;
+# extra Omarchy keys (red, yellow, hyprland_*, …) are harmless.
+
+mode = "dark"
+
+accent = "#7aa2f7"
+selection = "#33467c"
+muted = "#565f89"
+
+background = "#1a1b26"
+dark_background = "#16161e"
+darker_background = "#0d0e13"
+lighter_background = "#24283b"
+
+foreground = "#c0caf5"
+dark_foreground = "#565f89"
+light_foreground = "#c0caf5"
+bright_foreground = "#ffffff"
+
+red = "#f38ba8"
+yellow = "#f9e2af"
+orange = "#fab387"
+green = "#a6e3a1"
+cyan = "#94e2d5"
+blue = "#89b4fa"
+magenta = "#cba6f7"
+brown = "#7c5716"

@@ -13,7 +13,7 @@ CFLAGS  += $(shell pkg-config --cflags $(PKGS))
 LDFLAGS ?=
 LDLIBS  := $(shell pkg-config --libs $(PKGS))
 
-SRC      := src/main.c src/markdown.c src/term.c
+SRC      := src/main.c src/markdown.c src/term.c src/theme.c
 BUILDDIR := build
 BIN      := $(BUILDDIR)/omamd
 
@@ -23,7 +23,7 @@ PREFIX ?= $(HOME)/.local
 
 all: $(BIN)
 
-$(BIN): $(SRC) src/markdown.h src/term.h
+$(BIN): $(SRC) src/markdown.h src/term.h src/theme.h
 	mkdir -p $(BUILDDIR)
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS) $(LDLIBS)
 
@@ -44,6 +44,9 @@ test: $(BIN)
 	! $(BIN) --html examples/security.md | grep -q 'src="/etc/passwd"'
 	$(BIN) --term examples/welcome.md | grep -q 'Welcome'
 	! $(BIN) --term examples/welcome.md | grep -q '<h1>'
+	$(BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#1a1b26'
+	$(BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#c0caf5'
+	$(BIN) --theme /no/such/omamd-theme.toml --html examples/welcome.md | grep -q '<h1>'
 	@echo "ok"
 
 install: $(BIN) pkgbuild/omamd.desktop pkgbuild/omamd.svg
@@ -55,5 +58,6 @@ install: $(BIN) pkgbuild/omamd.desktop pkgbuild/omamd.svg
 	install -Dm644 fonts/iAWriterMonoS-Italic.ttf $(DESTDIR)$(PREFIX)/share/omamd/fonts/iAWriterMonoS-Italic.ttf
 	install -Dm644 fonts/iAWriterMonoS-Bold.ttf $(DESTDIR)$(PREFIX)/share/omamd/fonts/iAWriterMonoS-Bold.ttf
 	install -Dm644 fonts/iAWriterMonoS-BoldItalic.ttf $(DESTDIR)$(PREFIX)/share/omamd/fonts/iAWriterMonoS-BoldItalic.ttf
+	install -Dm644 examples/colors.toml $(DESTDIR)$(PREFIX)/share/omamd/colors.toml
 	-update-desktop-database $(DESTDIR)$(PREFIX)/share/applications
 	-gtk-update-icon-cache -q -t -f $(DESTDIR)$(PREFIX)/share/icons/hicolor

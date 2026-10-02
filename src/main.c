@@ -33,6 +33,7 @@
 
 #include "markdown.h"
 #include "term.h"
+#include "theme.h"
 
 #include <ctype.h>
 #include <fontconfig/fontconfig.h>
@@ -52,6 +53,10 @@
 
 /* Directory that holds the bundled iA Writer Mono S files, or "". */
 static char g_font_dir[4200];
+
+/* --theme PATH from the command line, or NULL.  theme.c also reads
+ * OMAMD_THEME, the Omarchy live file, and ~/.config/omamd/colors.toml. */
+static const char *g_theme_arg = NULL;
 
 /* ---------------------------------------------------------------
  * The App struct: all the program's live state in one bundle.
@@ -73,7 +78,7 @@ typedef struct {
     char *doc_dir;         /* realpath of that file's directory, or NULL */
     char *base_uri;        /* file:// URI of that file's directory */
     char *source;          /* malloc'd Markdown text currently shown */
-    char *css;             /* malloc'd stylesheet, from Omarchy if possible */
+    char *css;             /* malloc'd stylesheet, from the active palette */
     GtkCssProvider *ui_css; /* GTK chrome stylesheet; we reload this in place */
 
     GFileMonitor *monitor; /* watches the open Markdown file */
@@ -87,8 +92,8 @@ typedef struct {
     gdouble scroll_to;
     gint64 scroll_t0;
 
-    GFileMonitor *theme_dir_mon;    /* ~/.local/state/omarchy/current/ */
-    GFileMonitor *theme_colors_mon; /* .../theme/colors.toml */
+    GFileMonitor *theme_dir_mon;    /* Omarchy current/ or ~/.config/omamd */
+    GFileMonitor *theme_colors_mon; /* the colors.toml we loaded */
     guint theme_timeout;
 } App;
 
@@ -357,151 +362,12 @@ static int is_markdown_path(const char *path)
 }
 
 /* ---------------------------------------------------------------
- * Omarchy theme → CSS
+ * Palette → CSS
  *
- * Each Omarchy theme ships a colors.toml.  The one that is actually
- * in use is copied to:
- *
- *   ~/.local/state/omarchy/current/theme/colors.toml
- *
- * We read a handful of keys and turn them into CSS variables so the
- * preview follows Super+Ctrl+Shift+Space (or `omarchy theme set`)
- * the next time you open a file.  If that file is missing, we fall
- * back to a dark palette that still looks like a document.
+ * theme.c picks a colors.toml (or the built-in default) and fills
+ * a Palette.  We turn those hex values into CSS variables so the
+ * preview, the source view, and --html share one sheet.
  * --------------------------------------------------------------- */
-
-typedef struct {
-    char bg[16];
-    char fg[16];
-    char muted[16];
-    char accent[16];
-    char code_bg[16];
-    char surface[16];
-    char sel[16];
-    int dark;
-} Palette;
-
-static int valid_hex_color(const char *s)
-{
-    size_t n;
-    size_t i;
-    if (!s || s[0] != '#')
-        return 0;
-    n = strlen(s);
-    if (n != 4 && n != 7)
-        return 0;
-    for (i = 1; i < n; i++) {
-        if (!isxdigit((unsigned char)s[i]))
-            return 0;
-    }
-    return 1;
-}
-
-static void set_color(char *dst, size_t dst_sz, const char *src)
-{
-    size_t i;
-    for (i = 0; i + 1 < dst_sz && src[i] != '\0'; i++)
-        dst[i] = src[i];
-    dst[i] = '\0';
-}
-
-/* Pull `key = "value"` out of a tiny TOML subset.  Real TOML is more
- * than this; theme files only need this shape. */
-static int toml_get(const char *text, const char *key, char *out, size_t out_sz)
-{
-    const char *p = text;
-    size_t klen = strlen(key);
-
-    while (*p != '\0') {
-        int at_bol = (p == text || p[-1] == '\n');
-        if (at_bol && strncmp(p, key, klen) == 0) {
-            const char *q = p + klen;
-            const char *end;
-            size_t n;
-            while (*q == ' ' || *q == '\t')
-                q++;
-            if (*q != '=') {
-                p++;
-                continue;
-            }
-            q++;
-            while (*q == ' ' || *q == '\t')
-                q++;
-            if (*q != '"') {
-                p++;
-                continue;
-            }
-            q++;
-            end = q;
-            while (*end != '\0' && *end != '"' && *end != '\n')
-                end++;
-            n = (size_t)(end - q);
-            if (n >= out_sz)
-                n = out_sz - 1;
-            memcpy(out, q, n);
-            out[n] = '\0';
-            return 1;
-        }
-        p++;
-    }
-    return 0;
-}
-
-static void palette_default(Palette *p)
-{
-    /* A warm-dark fallback if Omarchy's file is not there. */
-    snprintf(p->bg, sizeof(p->bg), "%s", "#1e1e2e");
-    snprintf(p->fg, sizeof(p->fg), "%s", "#cdd6f4");
-    snprintf(p->muted, sizeof(p->muted), "%s", "#6c7086");
-    snprintf(p->accent, sizeof(p->accent), "%s", "#89b4fa");
-    snprintf(p->code_bg, sizeof(p->code_bg), "%s", "#11111b");
-    snprintf(p->surface, sizeof(p->surface), "%s", "#313244");
-    snprintf(p->sel, sizeof(p->sel), "%s", "#45475a");
-    p->dark = 1;
-}
-
-static void palette_load_omarchy(Palette *p)
-{
-    const char *home = getenv("HOME");
-    char path[512];
-    char *toml;
-    char buf[64];
-
-    palette_default(p);
-    if (!home)
-        return;
-    snprintf(path, sizeof(path),
-             "%s/.local/state/omarchy/current/theme/colors.toml", home);
-    toml = read_entire_file(path, NULL);
-    if (!toml)
-        return;
-
-    if (toml_get(toml, "mode", buf, sizeof(buf)))
-        p->dark = (strcmp(buf, "light") != 0);
-
-    if (toml_get(toml, "background", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->bg, sizeof(p->bg), buf);
-    if (toml_get(toml, "foreground", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->fg, sizeof(p->fg), buf);
-    if (toml_get(toml, "muted", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->muted, sizeof(p->muted), buf);
-    else if (toml_get(toml, "dark_foreground", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->muted, sizeof(p->muted), buf);
-    if (toml_get(toml, "accent", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->accent, sizeof(p->accent), buf);
-    else if (toml_get(toml, "blue", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->accent, sizeof(p->accent), buf);
-    if (toml_get(toml, "dark_background", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->code_bg, sizeof(p->code_bg), buf);
-    else if (toml_get(toml, "darker_background", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->code_bg, sizeof(p->code_bg), buf);
-    if (toml_get(toml, "lighter_background", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->surface, sizeof(p->surface), buf);
-    if (toml_get(toml, "selection", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->sel, sizeof(p->sel), buf);
-
-    free(toml);
-}
 
 static char *build_css(const Palette *p)
 {
@@ -1357,29 +1223,60 @@ static void on_mode_clicked(GtkButton *button, gpointer user_data)
 }
 
 /* ---------------------------------------------------------------
- * Follow Omarchy theme changes
+ * Follow theme file changes
  *
- * `omarchy theme set` does this (in order):
+ * On Omarchy, `omarchy theme set` does this (in order):
  *   1. rm -rf ~/.local/state/omarchy/current/theme
  *   2. mv a freshly copied theme directory into that path
  *   3. rewrite current/theme.name
- *
  * A file monitor on colors.toml dies at step 1, so we also watch
- * the stable `current/` directory.  Events are debounced so we
- * apply once, after the new colors.toml is in place.
+ * the stable `current/` directory.
+ *
+ * Off Omarchy we watch ~/.config/omamd/ (and the file inside it)
+ * so a pasted colors.toml is picked up without a restart.  --theme
+ * PATH watches that file and its parent directory.
+ *
+ * Events are debounced so we apply once, after the new file is
+ * in place.
  * --------------------------------------------------------------- */
 
-static void omarchy_current_path(char *out, size_t out_sz, const char *leaf)
+static void app_watch_colors_file(App *app);
+static void on_theme_fs_event(GFileMonitor *monitor, GFile *file, GFile *other,
+                              GFileMonitorEvent event, gpointer user_data);
+
+static void watch_path_file(GFileMonitor **slot, const char *path, App *app)
 {
-    const char *home = getenv("HOME");
-    if (!home) {
-        out[0] = '\0';
-        return;
+    GFile *gf;
+
+    if (*slot) {
+        g_object_unref(*slot);
+        *slot = NULL;
     }
-    snprintf(out, out_sz, "%s/.local/state/omarchy/current/%s", home, leaf);
+    if (!path || !path[0] || !g_file_test(path, G_FILE_TEST_IS_REGULAR))
+        return;
+    gf = g_file_new_for_path(path);
+    *slot = g_file_monitor_file(gf, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
+    g_object_unref(gf);
+    if (*slot)
+        g_signal_connect(*slot, "changed", G_CALLBACK(on_theme_fs_event), app);
 }
 
-static void app_watch_colors_file(App *app);
+static void watch_path_dir(GFileMonitor **slot, const char *path, App *app)
+{
+    GFile *gf;
+
+    if (*slot) {
+        g_object_unref(*slot);
+        *slot = NULL;
+    }
+    if (!path || !path[0] || !g_file_test(path, G_FILE_TEST_IS_DIR))
+        return;
+    gf = g_file_new_for_path(path);
+    *slot = g_file_monitor_directory(gf, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
+    g_object_unref(gf);
+    if (*slot)
+        g_signal_connect(*slot, "changed", G_CALLBACK(on_theme_fs_event), app);
+}
 
 static gboolean app_apply_theme_now(gpointer user_data)
 {
@@ -1388,20 +1285,24 @@ static gboolean app_apply_theme_now(gpointer user_data)
     GdkRGBA bg;
     char *css;
     char colors_path[512];
+    char live_dir[512];
+    ThemeKind kind;
     const char *page;
     const char *title;
 
     app->theme_timeout = 0;
 
-    omarchy_current_path(colors_path, sizeof(colors_path), "theme/colors.toml");
-    if (colors_path[0] == '\0' ||
-        !g_file_test(colors_path, G_FILE_TEST_IS_REGULAR)) {
-        /* Between rm and mv.  Try again shortly. */
+    kind = theme_resolve(g_theme_arg, colors_path, sizeof(colors_path), 1);
+    if (kind == THEME_KIND_NONE && theme_omarchy_live_dir(live_dir, sizeof(live_dir))) {
+        /* Between rm and mv on Omarchy.  Try again shortly. */
         app->theme_timeout = g_timeout_add(80, app_apply_theme_now, app);
         return G_SOURCE_REMOVE;
     }
 
-    palette_load_omarchy(&pal);
+    palette_default(&pal);
+    if (kind != THEME_KIND_NONE)
+        palette_load_file(&pal, colors_path);
+
     css = build_css(&pal);
     if (!css)
         return G_SOURCE_REMOVE;
@@ -1414,7 +1315,7 @@ static gboolean app_apply_theme_now(gpointer user_data)
 
     free(app->css);
     app->css = css;
-    set_color(app->icon_fg, sizeof(app->icon_fg), pal.fg);
+    snprintf(app->icon_fg, sizeof(app->icon_fg), "%s", pal.fg);
     apply_ui_css(app, &pal);
     if (gdk_rgba_parse(&bg, pal.bg))
         webkit_web_view_set_background_color(WEBKIT_WEB_VIEW(app->web_view), &bg);
@@ -1451,47 +1352,40 @@ static void on_theme_fs_event(GFileMonitor *monitor, GFile *file, GFile *other,
 static void app_watch_colors_file(App *app)
 {
     char path[512];
-    GFile *gf;
+    ThemeKind kind;
 
-    if (app->theme_colors_mon) {
-        g_object_unref(app->theme_colors_mon);
-        app->theme_colors_mon = NULL;
-    }
-    omarchy_current_path(path, sizeof(path), "theme/colors.toml");
-    if (path[0] == '\0' || !g_file_test(path, G_FILE_TEST_IS_REGULAR))
-        return;
-    gf = g_file_new_for_path(path);
-    app->theme_colors_mon = g_file_monitor_file(
-        gf, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
-    g_object_unref(gf);
-    if (app->theme_colors_mon)
-        g_signal_connect(app->theme_colors_mon, "changed",
-                         G_CALLBACK(on_theme_fs_event), app);
+    kind = theme_resolve(g_theme_arg, path, sizeof(path), 0);
+    if (kind == THEME_KIND_NONE)
+        theme_user_config_path(path, sizeof(path));
+    watch_path_file(&app->theme_colors_mon, path, app);
 }
 
 static void app_watch_theme(App *app)
 {
     char path[512];
-    GFile *gf;
+    char dir[512];
+    ThemeKind kind;
 
-    omarchy_current_path(path, sizeof(path), "");
-    if (path[0] == '\0')
+    kind = theme_resolve(g_theme_arg, path, sizeof(path), 0);
+
+    if (kind == THEME_KIND_EXPLICIT) {
+        watch_path_file(&app->theme_colors_mon, path, app);
+        if (theme_parent_dir(path, dir, sizeof(dir)))
+            watch_path_dir(&app->theme_dir_mon, dir, app);
         return;
-    /* Trailing slash from "%s/" + "" — strip it for g_file_new. */
-    {
-        size_t n = strlen(path);
-        if (n > 0 && path[n - 1] == '/')
-            path[n - 1] = '\0';
     }
-    gf = g_file_new_for_path(path);
-    app->theme_dir_mon = g_file_monitor_directory(
-        gf, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
-    g_object_unref(gf);
-    if (app->theme_dir_mon)
-        g_signal_connect(app->theme_dir_mon, "changed",
-                         G_CALLBACK(on_theme_fs_event), app);
 
-    app_watch_colors_file(app);
+    if (theme_omarchy_live_dir(dir, sizeof(dir))) {
+        watch_path_dir(&app->theme_dir_mon, dir, app);
+        if (kind == THEME_KIND_OMARCHY)
+            watch_path_file(&app->theme_colors_mon, path, app);
+        return;
+    }
+
+    theme_user_config_path(path, sizeof(path));
+    if (theme_parent_dir(path, dir, sizeof(dir)))
+        watch_path_dir(&app->theme_dir_mon, dir, app);
+    watch_path_file(&app->theme_colors_mon, path, app);
 }
 
 static void app_clear_theme_watch(App *app)
@@ -1610,6 +1504,7 @@ static void usage(FILE *out)
             "  omamd [file.md]         open in a window\n"
             "  omamd --term [file.md]  render in the terminal (SSH)\n"
             "  omamd --html [file.md]  Markdown to HTML on stdout\n"
+            "  omamd --theme FILE.toml  use this colors.toml\n"
             "  omamd --help            this text\n"
             "\n"
             "Keys:  Ctrl+O open   Ctrl+R reload   Ctrl+1 preview\n"
@@ -1651,7 +1546,7 @@ static int run_html_mode(const char *path)
         fprintf(stderr, "omamd: out of memory\n");
         return 1;
     }
-    palette_load_omarchy(&pal);
+    palette_load(&pal, g_theme_arg);
     css = build_css(&pal);
     page = wrap_document(title, css, fragment);
     free(fragment);
@@ -1715,7 +1610,7 @@ static int run_term_mode(const char *path)
         watch = NULL;
     }
 
-    palette_load_omarchy(&pal);
+    palette_load(&pal, g_theme_arg);
     memset(&tp, 0, sizeof(tp));
     tp.color = getenv("NO_COLOR") == NULL;
     tp.fg = rgb_parse(pal.fg);
@@ -1752,6 +1647,15 @@ int main(int argc, char **argv)
         }
         if (strcmp(argv[i], "--term") == 0 || strcmp(argv[i], "-t") == 0) {
             term_mode = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--theme") == 0) {
+            if (i + 1 >= argc || argv[i + 1][0] == '-') {
+                fprintf(stderr, "omamd: --theme needs a file path\n");
+                usage(stderr);
+                return 2;
+            }
+            g_theme_arg = argv[++i];
             continue;
         }
         if (argv[i][0] == '-') {
