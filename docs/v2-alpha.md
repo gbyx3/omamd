@@ -13,15 +13,18 @@ ready to merge to `master`.
 
 ```
 core/
+  omamd.h             # umbrella ABI for Swift
   markdown.c / .h     # Markdown → HTML fragment
   theme.c / .h        # colors.toml → Palette
   html.c / .h         # Palette + fragment → full HTML page
   util.c / .h         # read file/stdin, path helpers
+  fonts.c / .h        # bundled iA Writer Mono S search
   term.c / .h         # ANSI pager (Linux + Mac CLI)
 cli/
-  main.c              # --html / --term / --theme  (no GTK)
+  cli.c / .h          # argv, --html, --term
+  main.c              # GTK-free entry
 linux/
-  gtk.c               # today's window
+  gtk.c               # GTK window
 apple/
   Omamd.xcodeproj     # SwiftUI + WKWebView, links core/*.c
 fonts/ examples/ pkgbuild/ docs/
@@ -38,7 +41,7 @@ preview produce the same page.
 
 ## Already on this branch
 
-Theme loading is out of GTK (`src/theme.c`). Lookup order:
+Theme loading is out of GTK (`core/theme.c`). Lookup order:
 
 1. `omamd --theme PATH`
 2. `$OMAMD_THEME`
@@ -49,12 +52,10 @@ Theme loading is out of GTK (`src/theme.c`). Lookup order:
 Paste a file at `~/.config/omamd/colors.toml` on a machine without
 Omarchy. `examples/colors.toml` is the template.
 
-## Still stuck in GTK (`src/main.c`)
+## Linux GTK (`linux/gtk.c`)
 
-| Function | Move to |
-|---|---|
-| Window, WebKitGTK, GFileMonitor, drag-drop, Hyprland chrome | `linux/gtk.c` |
-| `apply_ui_css` / fontconfig registration | Linux only |
+Window, WebKitGTK, GFileMonitor, drag-drop, Hyprland chrome, and
+fontconfig registration stay here.
 
 `make test` uses the CLI binary (`--html` / `--term`) with plain `cc`.
 On Omarchy it also builds the GTK `omamd`.
@@ -65,20 +66,20 @@ Each PR leaves the Omarchy GTK app working.
 
 ### PR 1 — HTML document in core — done on this branch
 
-`src/html.c`: `omamd_css()` + `omamd_document()`. Fonts are a directory
-argument; fontconfig stays in `main.c`.
+`core/html.c`: `omamd_css()` + `omamd_document()`. Fonts are a directory
+argument; fontconfig stays in `linux/gtk.c`.
 
 ### PR 2 — CLI without GTK — done on this branch
 
-`src/cli.c` / `src/cli_main.c` / `src/util.c` / `src/fonts.c`.
+`cli/cli.c` / `cli/main.c` / `core/util.c` / `core/fonts.c`.
 `make` on a Mac produces `build/omamd` (`--html`, `--term`, pager).
 On Omarchy, `build/omamd` is still GTK and `build/omamd-cli` is the
 GTK-free binary. `make test` uses the CLI.
 
-### PR 3 — Tree move
+### PR 3 — Tree move — done on this branch
 
-`src/` → `core/` + `linux/` + `cli/`. Update README, PKGBUILD,
-`bin/build`. No behaviour change.
+`src/` → `core/` + `linux/` + `cli/`. `core/omamd.h` is the umbrella
+header for Swift. Makefile uses `-I core -I cli`. No behaviour change.
 
 ### PR 4 — Xcode skeleton (Mac first)
 
@@ -133,28 +134,8 @@ for the Mac app and the iOS simulator.
 | Window chrome | undecorated (Hyprland) | system titlebar | system chrome |
 | Bundle id | — | `rocks.gurra.omamd` | `rocks.gurra.omamd` |
 
-## Test on this Mac (after PR 2)
+## Test on this Mac
 
 ```
 make test
-```
-
-Until then, the theme loader:
-
-```
-cc -std=c11 -Wall -Wextra -I src -o /tmp/omamd-theme-probe \
-  -x c - src/theme.c <<'EOF'
-#include "theme.h"
-#include <stdio.h>
-int main(int argc, char **argv) {
-    Palette p;
-    char path[512];
-    const char *cli = argc > 1 ? argv[1] : NULL;
-    ThemeKind k = theme_resolve(cli, path, sizeof(path), 1);
-    palette_load(&p, cli);
-    printf("kind=%d path=%s bg=%s fg=%s\n", (int)k, path[0]?path:"-", p.bg, p.fg);
-    return 0;
-}
-EOF
-/tmp/omamd-theme-probe examples/colors.toml
 ```

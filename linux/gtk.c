@@ -1,7 +1,7 @@
 #define _DEFAULT_SOURCE
 
 /*
- * main.c — the window, the buttons, and the file loading.
+ * linux/gtk.c — the window, the buttons, and the file loading.
  *
  * Read markdown.c first.  That file is the language lesson.
  * This file is the "how a graphical C program is wired" lesson.
@@ -15,9 +15,9 @@
  *
  * The life of this program:
  *
- *   1. Look at the command-line arguments (cli.c).
+ *   1. Look at the command-line arguments (cli/cli.c).
  *   2. If the user asked for --html or --term, handle that and exit.
- *      Those paths also live in the GTK-free binary (cli_main.c).
+ *      Those paths also live in the GTK-free binary (cli/main.c).
  *   3. Otherwise gtk_init() talks to the Wayland/X11 display.
  *   4. Build the window, connect signals, load a file if one was given.
  *   5. gtk_main() sits in a loop: wait for an event, handle it, repeat
@@ -191,7 +191,7 @@ static const char *const WELCOME_MD =
     "\n"
     "> Edit the C, run `make`, and this page is yours to change.\n"
     "\n"
-    "Read `src/markdown.h` then `src/markdown.c` then this file, `src/main.c`.\n";
+    "Read `core/markdown.h` then `core/markdown.c` then this file, `linux/gtk.c`.\n";
 
 /* ---------------------------------------------------------------
  * Loading a document into the widgets

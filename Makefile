@@ -21,8 +21,11 @@ LDLIBS  :=
 endif
 
 BUILDDIR := build
-COMMON   := src/cli.c src/util.c src/fonts.c src/markdown.c src/theme.c src/html.c src/term.c
-HDRS     := src/cli.h src/util.h src/fonts.h src/markdown.h src/theme.h src/html.h src/term.h
+INCLUDES := -I core -I cli
+CORE     := core/util.c core/fonts.c core/markdown.c core/theme.c core/html.c core/term.c
+CLI_SRC  := cli/cli.c
+COMMON   := $(CLI_SRC) $(CORE)
+HDRS     := core/omamd.h core/util.h core/fonts.h core/markdown.h core/theme.h core/html.h core/term.h cli/cli.h
 
 ifeq ($(HAVE_GTK),yes)
 BIN      := $(BUILDDIR)/omamd
@@ -41,14 +44,14 @@ ifeq ($(HAVE_GTK),yes)
 all: $(CLI_BIN)
 endif
 
-$(CLI_BIN): src/cli_main.c $(COMMON) $(HDRS)
+$(CLI_BIN): cli/main.c $(COMMON) $(HDRS)
 	mkdir -p $(BUILDDIR)
-	$(CC) $(CLI_CFLAGS) -o $@ src/cli_main.c $(COMMON)
+	$(CC) $(CLI_CFLAGS) $(INCLUDES) -o $@ cli/main.c $(COMMON)
 
 ifeq ($(HAVE_GTK),yes)
-$(BIN): src/main.c $(COMMON) $(HDRS) src/html.h
+$(BIN): linux/gtk.c $(COMMON) $(HDRS)
 	mkdir -p $(BUILDDIR)
-	$(CC) $(CFLAGS) -o $@ src/main.c $(COMMON) $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CFLAGS) $(INCLUDES) -o $@ linux/gtk.c $(COMMON) $(LDFLAGS) $(LDLIBS)
 endif
 
 clean:

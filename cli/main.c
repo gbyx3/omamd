@@ -1,10 +1,10 @@
 /*
- * cli_main.c — omamd without GTK.
+ * cli/main.c — omamd without GTK.
  *
  * On a Mac, or any machine without WebKitGTK, this is the `omamd`
  * binary: --html, --term, and a pager when you pass a .md file.
- * The Linux GTK binary has its own main() in main.c and links this
- * same cli.c for the flags it shares.
+ * The Linux GTK binary has its own main() in linux/gtk.c and links
+ * this same cli.c for the flags it shares.
  */
 
 #include "cli.h"
