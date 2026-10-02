@@ -1,35 +1,34 @@
 # omamd palette — same keys as an Omarchy theme's colors.toml.
 #
-# Copy this file (or paste one from an Omarchy machine) to:
-#   ~/.config/omamd/colors.toml
-# or pass it in:
-#   omamd --theme examples/colors.toml notes.md
-#   OMAMD_THEME=/path/to/colors.toml omamd notes.md
+# This one is a light paper page with ink and a red accent, so it is
+# obviously different from the built-in dark default (#1e1e2e).
 #
-# Lines starting with # are ignored.  Only these keys are read;
-# extra Omarchy keys (red, yellow, hyprland_*, …) are harmless.
+#   omamd --html examples/welcome.md
+#   omamd --theme examples/colors.toml --html examples/welcome.md
+#
+# Copy to ~/.config/omamd/colors.toml to make it the default off Omarchy.
 
-mode = "dark"
+mode = "light"
 
-accent = "#7aa2f7"
-selection = "#33467c"
-muted = "#565f89"
+accent = "#c81e1e"
+selection = "#f4c7a8"
+muted = "#7d5c3e"
 
-background = "#1a1b26"
-dark_background = "#16161e"
-darker_background = "#0d0e13"
-lighter_background = "#24283b"
+background = "#fff8ee"
+dark_background = "#f3e6d4"
+darker_background = "#e8d5b8"
+lighter_background = "#ead9c2"
 
-foreground = "#c0caf5"
-dark_foreground = "#565f89"
-light_foreground = "#c0caf5"
-bright_foreground = "#ffffff"
+foreground = "#1a1008"
+dark_foreground = "#7d5c3e"
+light_foreground = "#1a1008"
+bright_foreground = "#000000"
 
-red = "#f38ba8"
-yellow = "#f9e2af"
-orange = "#fab387"
-green = "#a6e3a1"
-cyan = "#94e2d5"
-blue = "#89b4fa"
-magenta = "#cba6f7"
+red = "#c81e1e"
+yellow = "#b58100"
+orange = "#d9480f"
+green = "#2b6b3a"
+cyan = "#0f6f7a"
+blue = "#1d4e89"
+magenta = "#8c1a6a"
 brown = "#7c5716"

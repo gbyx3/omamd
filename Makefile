@@ -68,8 +68,10 @@ test-cli: $(CLI_BIN)
 	! $(CLI_BIN) --html examples/security.md | grep -q 'src="/etc/passwd"'
 	$(CLI_BIN) --term examples/welcome.md | grep -q 'Welcome'
 	! $(CLI_BIN) --term examples/welcome.md | grep -q '<h1>'
-	$(CLI_BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#1a1b26'
-	$(CLI_BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#c0caf5'
+	$(CLI_BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#fff8ee'
+	$(CLI_BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#c81e1e'
+	! $(CLI_BIN) --html examples/welcome.md | grep -q '#fff8ee'
+	$(CLI_BIN) --html examples/welcome.md | grep -q '#1e1e2e'
 	$(CLI_BIN) --theme /no/such/omamd-theme.toml --html examples/welcome.md | grep -q '<h1>'
 	$(CLI_BIN) --html examples/welcome.md | grep -q '@font-face'
 	$(CLI_BIN) --html examples/welcome.md | grep -q 'file://'
@@ -80,7 +82,7 @@ test-cli: $(CLI_BIN)
 test-gtk: $(BIN)
 	$(BIN) --html examples/welcome.md | grep -q '<h1>'
 	$(BIN) --term examples/welcome.md | grep -q 'Welcome'
-	$(BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#1a1b26'
+	$(BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#fff8ee'
 	@echo "ok (gtk)"
 
 test: test-cli
