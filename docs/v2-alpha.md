@@ -82,10 +82,13 @@ GTK-free binary. `make test` uses the CLI.
 
 ### PR 4 — Xcode skeleton (Mac first)
 
-`apple/` SwiftUI app, macOS target. Bridging header includes
-`markdown.h`, `theme.h`, `html.h`. One screen: WKWebView loading
-`omamd_document()` of `examples/welcome.md`. Bundle the OFL fonts;
-register them with Core Text.
+`apple/` SwiftUI app, macOS target. Bundle id `rocks.gurra.omamd`.
+Bridging header includes `omamd.h` (markdown, theme, html, util).
+One screen: WKWebView loading `omamd_document()` of
+`examples/welcome.md`. Bundle the OFL fonts; register them with
+Core Text. Viewer (`WindowGroup` + Open), not `DocumentGroup`.
+Makefile `build/omamd` stays the CLI; the `.app` does not link
+`cli.c`, `term.c`, or GTK.
 
 ### PR 5 — Mac viewer behaviour
 
@@ -116,6 +119,7 @@ for the Mac app and the iOS simulator.
   around `theme_omarchy_live_dir()`.
 - Fonts stay OFL-bundled. Each shell registers them (fontconfig /
   `@font-face` / `CTFontManager`).
+- Apple bundle identifier is `rocks.gurra.omamd` on macOS and iOS.
 
 ## Platform contracts
 
@@ -127,6 +131,7 @@ for the Mac app and the iOS simulator.
 | Palette | Omarchy live, then config | `~/.config/omamd/colors.toml` | bundled + import |
 | `--html` / `--term` | yes | yes (CLI) | no |
 | Window chrome | undecorated (Hyprland) | system titlebar | system chrome |
+| Bundle id | — | `rocks.gurra.omamd` | `rocks.gurra.omamd` |
 
 ## Test on this Mac (after PR 2)
 
