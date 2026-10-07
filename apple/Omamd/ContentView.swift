@@ -9,9 +9,11 @@ struct ContentView: View {
             preview
                 .opacity(viewer.mode == .preview ? 1 : 0)
                 .allowsHitTesting(viewer.mode == .preview)
+                .ignoresSafeArea(.container, edges: viewer.hideTitleBar ? .top : [])
             source
                 .opacity(viewer.mode == .source ? 1 : 0)
                 .allowsHitTesting(viewer.mode == .source)
+                .ignoresSafeArea(.container, edges: viewer.hideTitleBar ? .top : [])
 
             Button(action: viewer.toggleMode) {
                 Image(systemName: viewer.mode == .preview
@@ -32,7 +34,12 @@ struct ContentView: View {
             .padding(14)
         }
         .background(Color(hex: viewer.palette.bg))
-        .background(WindowChrome(title: viewer.windowTitle, hideTitleBar: viewer.hideTitleBar))
+        .background(WindowChrome(
+            title: viewer.windowTitle,
+            hideTitleBar: viewer.hideTitleBar,
+            backgroundHex: viewer.palette.bg,
+            dark: viewer.palette.dark
+        ))
         .frame(minWidth: 520, minHeight: 640)
         .ignoresSafeArea(.container, edges: viewer.hideTitleBar ? .top : [])
         .onDrop(of: [.fileURL], isTargeted: nil, perform: viewer.drop)

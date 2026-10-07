@@ -17,6 +17,10 @@ struct MarkdownWebView: NSViewRepresentable {
         let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
         view.navigationDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
+        if view.responds(to: Selector(("setAutomaticallyAdjustsContentInsets:"))) {
+            view.setValue(false, forKey: "automaticallyAdjustsContentInsets")
+        }
+        WindowChrome.suppressScrollPockets(view, hidden: true)
         return view
     }
 
@@ -31,6 +35,7 @@ struct MarkdownWebView: NSViewRepresentable {
             context.coordinator.scrolledFollow = followGeneration
             Self.scrollToEnd(view)
         }
+        WindowChrome.suppressScrollPockets(view, hidden: true)
     }
 
     static func scrollToEnd(_ view: WKWebView) {
@@ -85,6 +90,7 @@ struct MarkdownWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            WindowChrome.suppressScrollPockets(webView, hidden: true)
             guard pendingFollow != scrolledFollow else { return }
             scrolledFollow = pendingFollow
             MarkdownWebView.scrollToEnd(webView)
@@ -95,43 +101,156 @@ struct MarkdownWebView: NSViewRepresentable {
 struct WindowChrome: NSViewRepresentable {
     var title: String
     var hideTitleBar: Bool
+    var backgroundHex: String
+    var dark: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
 
     func makeNSView(context: Context) -> NSView {
         NSView()
     }
 
     func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.title = title
+        context.coordinator.hideTitleBar = hideTitleBar
+        context.coordinator.background = Self.nsColor(hex: backgroundHex)
+        context.coordinator.dark = dark
         DispatchQueue.main.async {
-            Self.apply(view.window, title: title, hideTitleBar: hideTitleBar)
+            context.coordinator.attach(view.window)
         }
     }
 
-    static func apply(_ window: NSWindow?, title: String, hideTitleBar: Bool) {
-        guard let window else { return }
-        window.title = title
-        window.titlebarSeparatorStyle = .none
-        /* Keep .titled so the window stays AXStandardWindow. Yabai
-         * floats AXDialog, which is what you get without .titled. */
-        window.styleMask.insert(.titled)
-        if hideTitleBar {
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.styleMask.insert(.fullSizeContentView)
-            window.isMovableByWindowBackground = true
-        } else {
-            window.titleVisibility = .visible
-            window.titlebarAppearsTransparent = false
-            window.styleMask.remove(.fullSizeContentView)
-            window.isMovableByWindowBackground = false
-        }
-        setTrafficLights(window, hidden: hideTitleBar)
+    static func nsColor(hex: String) -> NSColor {
+        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("#") { s.removeFirst() }
+        var n: UInt64 = 0
+        Scanner(string: s).scanHexInt64(&n)
+        return NSColor(
+            srgbRed: CGFloat((n >> 16) & 0xff) / 255,
+            green: CGFloat((n >> 8) & 0xff) / 255,
+            blue: CGFloat(n & 0xff) / 255,
+            alpha: 1
+        )
     }
 
-    static func setTrafficLights(_ window: NSWindow, hidden: Bool) {
-        let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
-        for type in buttons {
-            window.standardWindowButton(type)?.isHidden = hidden
+    final class Coordinator {
+        var title = "omamd"
+        var hideTitleBar = false
+        var background = NSColor.black
+        var dark = true
+        private weak var window: NSWindow?
+        private var observers: [NSObjectProtocol] = []
+
+        func attach(_ window: NSWindow?) {
+            guard let window else { return }
+            if self.window !== window {
+                detach()
+                self.window = window
+                let nc = NotificationCenter.default
+                let names: [Notification.Name] = [
+                    NSWindow.didBecomeKeyNotification,
+                    NSWindow.didResignKeyNotification,
+                    NSWindow.didBecomeMainNotification,
+                    NSWindow.didResignMainNotification,
+                ]
+                observers = names.map { name in
+                    nc.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                        self?.apply()
+                    }
+                }
+            }
+            apply()
         }
-        window.standardWindowButton(.closeButton)?.superview?.isHidden = hidden
+
+        func detach() {
+            observers.forEach { NotificationCenter.default.removeObserver($0) }
+            observers.removeAll()
+            window = nil
+        }
+
+        deinit { detach() }
+
+        func apply() {
+            guard let window else { return }
+            window.title = title
+            window.titlebarSeparatorStyle = .none
+            window.backgroundColor = background
+            window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            /* Keep .titled so the window stays AXStandardWindow. Yabai
+             * floats AXDialog, which is what you get without .titled. */
+            window.styleMask.insert(.titled)
+            if hideTitleBar {
+                window.titleVisibility = .hidden
+                window.titlebarAppearsTransparent = true
+                window.styleMask.insert(.fullSizeContentView)
+                window.isMovableByWindowBackground = true
+            } else {
+                window.titleVisibility = .visible
+                window.titlebarAppearsTransparent = false
+                window.styleMask.remove(.fullSizeContentView)
+                window.isMovableByWindowBackground = false
+            }
+            setTrafficLights(window, hidden: hideTitleBar)
+            hideTitlebarMaterial(window, hidden: hideTitleBar)
+            if let root = window.contentView {
+                WindowChrome.suppressScrollPockets(root, hidden: hideTitleBar)
+            }
+        }
+
+        func setTrafficLights(_ window: NSWindow, hidden: Bool) {
+            let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+            for type in buttons {
+                window.standardWindowButton(type)?.isHidden = hidden
+            }
+            let bar = window.standardWindowButton(.closeButton)?.superview
+            bar?.isHidden = hidden
+            bar?.superview?.isHidden = hidden
+        }
+
+        func hideTitlebarMaterial(_ window: NSWindow, hidden: Bool) {
+            guard hidden, let frame = window.contentView?.superview else { return }
+            func walk(_ view: NSView) {
+                let typeName = String(describing: type(of: view))
+                if view is NSVisualEffectView || typeName.contains("Titlebar") {
+                    view.isHidden = true
+                    view.alphaValue = 0
+                }
+                if view.frame.height > 0 && view.frame.height <= 2 && view.frame.width > 40 {
+                    view.isHidden = true
+                }
+                view.subviews.forEach(walk)
+            }
+            for sub in frame.subviews where sub !== window.contentView {
+                walk(sub)
+            }
+        }
+    }
+
+    /* macOS 26 scroll pockets paint a 32pt material strip in hidden
+     * title bars (same bug Ghostty worked around). */
+    static func suppressScrollPockets(_ root: NSView, hidden: Bool) {
+        func walk(_ view: NSView) {
+            let name = String(describing: type(of: view))
+            if name.contains("ScrollPocket") {
+                view.isHidden = hidden
+                view.alphaValue = hidden ? 0 : 1
+            }
+            if name.contains("BackdropView") && view.frame.height > 0 && view.frame.height <= 40 {
+                view.isHidden = hidden
+                view.alphaValue = hidden ? 0 : 1
+            }
+            if hidden {
+                if view.responds(to: Selector(("setAllowedPocketEdges:"))) {
+                    view.setValue(0, forKey: "allowedPocketEdges")
+                }
+                if view.responds(to: Selector(("setAlwaysShownPocketEdges:"))) {
+                    view.setValue(0, forKey: "alwaysShownPocketEdges")
+                }
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(root)
     }
 }
