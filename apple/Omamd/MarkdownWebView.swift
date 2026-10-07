@@ -110,21 +110,20 @@ struct WindowChrome: NSViewRepresentable {
         guard let window else { return }
         window.title = title
         window.titlebarSeparatorStyle = .none
-        var mask = window.styleMask
+        /* Keep .titled so the window stays AXStandardWindow. Yabai
+         * floats AXDialog, which is what you get without .titled. */
+        window.styleMask.insert(.titled)
         if hideTitleBar {
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
-            mask.insert(.fullSizeContentView)
-            mask.remove(.titled)
+            window.styleMask.insert(.fullSizeContentView)
             window.isMovableByWindowBackground = true
         } else {
             window.titleVisibility = .visible
             window.titlebarAppearsTransparent = false
-            mask.insert(.titled)
-            mask.remove(.fullSizeContentView)
+            window.styleMask.remove(.fullSizeContentView)
             window.isMovableByWindowBackground = false
         }
-        window.styleMask = mask
         setTrafficLights(window, hidden: hideTitleBar)
     }
 
