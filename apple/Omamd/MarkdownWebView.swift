@@ -109,17 +109,22 @@ struct WindowChrome: NSViewRepresentable {
     static func apply(_ window: NSWindow?, title: String, hideTitleBar: Bool) {
         guard let window else { return }
         window.title = title
+        window.titlebarSeparatorStyle = .none
+        var mask = window.styleMask
         if hideTitleBar {
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
-            window.styleMask.insert(.fullSizeContentView)
+            mask.insert(.fullSizeContentView)
+            mask.remove(.titled)
             window.isMovableByWindowBackground = true
         } else {
             window.titleVisibility = .visible
             window.titlebarAppearsTransparent = false
-            window.styleMask.remove(.fullSizeContentView)
+            mask.insert(.titled)
+            mask.remove(.fullSizeContentView)
             window.isMovableByWindowBackground = false
         }
+        window.styleMask = mask
         setTrafficLights(window, hidden: hideTitleBar)
     }
 

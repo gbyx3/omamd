@@ -34,6 +34,7 @@ struct ContentView: View {
         .background(Color(hex: viewer.palette.bg))
         .background(WindowChrome(title: viewer.windowTitle, hideTitleBar: viewer.hideTitleBar))
         .frame(minWidth: 520, minHeight: 640)
+        .ignoresSafeArea(.container, edges: viewer.hideTitleBar ? .top : [])
         .onDrop(of: [.fileURL], isTargeted: nil, perform: viewer.drop)
     }
 
