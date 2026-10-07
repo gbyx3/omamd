@@ -32,7 +32,7 @@ struct ContentView: View {
             .padding(14)
         }
         .background(Color(hex: viewer.palette.bg))
-        .background(WindowTitleSetter(title: viewer.windowTitle))
+        .background(WindowChrome(title: viewer.windowTitle, hideTitleBar: viewer.hideTitleBar))
         .frame(minWidth: 520, minHeight: 640)
         .onDrop(of: [.fileURL], isTargeted: nil, perform: viewer.drop)
     }

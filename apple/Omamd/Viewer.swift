@@ -18,8 +18,10 @@ final class Viewer: ObservableObject {
     @Published var palette = Omamd.palette()
     @Published var followGeneration = 0
     @Published var themeID: String
+    @Published var hideTitleBar: Bool
 
     private static let themeIDKey = "omamd.themeID"
+    private static let hideTitleBarKey = "omamd.hideTitleBar"
 
     let fontDir = BundledFonts.directory
     private(set) var docDir: URL?
@@ -37,6 +39,11 @@ final class Viewer: ObservableObject {
         } else {
             themeID = ThemeCatalog.defaultID
         }
+        if UserDefaults.standard.object(forKey: Self.hideTitleBarKey) == nil {
+            hideTitleBar = true
+        } else {
+            hideTitleBar = UserDefaults.standard.bool(forKey: Self.hideTitleBarKey)
+        }
         showWelcome()
         watchTheme()
     }
@@ -47,6 +54,11 @@ final class Viewer: ObservableObject {
 
     func toggleMode() {
         mode = (mode == .preview) ? .source : .preview
+    }
+
+    func setHideTitleBar(_ hide: Bool) {
+        hideTitleBar = hide
+        UserDefaults.standard.set(hide, forKey: Self.hideTitleBarKey)
     }
 
     func showWelcome() {

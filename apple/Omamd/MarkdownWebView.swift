@@ -16,6 +16,7 @@ struct MarkdownWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
         view.navigationDelegate = context.coordinator
+        view.setValue(false, forKey: "drawsBackground")
         return view
     }
 
@@ -91,14 +92,33 @@ struct MarkdownWebView: NSViewRepresentable {
     }
 }
 
-struct WindowTitleSetter: NSViewRepresentable {
+struct WindowChrome: NSViewRepresentable {
     var title: String
+    var hideTitleBar: Bool
 
     func makeNSView(context: Context) -> NSView {
         NSView()
     }
 
     func updateNSView(_ view: NSView, context: Context) {
-        view.window?.title = title
+        DispatchQueue.main.async {
+            Self.apply(view.window, title: title, hideTitleBar: hideTitleBar)
+        }
+    }
+
+    static func apply(_ window: NSWindow?, title: String, hideTitleBar: Bool) {
+        guard let window else { return }
+        window.title = title
+        if hideTitleBar {
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.styleMask.insert(.fullSizeContentView)
+            window.isMovableByWindowBackground = true
+        } else {
+            window.titleVisibility = .visible
+            window.titlebarAppearsTransparent = false
+            window.styleMask.remove(.fullSizeContentView)
+            window.isMovableByWindowBackground = false
+        }
     }
 }

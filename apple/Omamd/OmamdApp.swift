@@ -29,6 +29,9 @@ struct OmamdApp: App {
                     .keyboardShortcut("1", modifiers: .command)
                 Button("Source") { viewer.mode = .source }
                     .keyboardShortcut("2", modifiers: .command)
+                Button(viewer.hideTitleBar ? "Show Title Bar" : "Hide Title Bar") {
+                    viewer.setHideTitleBar(!viewer.hideTitleBar)
+                }
                 Divider()
                 Picker("Theme", selection: themeBinding) {
                     Text("Default").tag(ThemeCatalog.defaultID)

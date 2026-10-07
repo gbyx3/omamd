@@ -17,6 +17,7 @@ struct SettingsView: View {
             Button("Choose File…") {
                 viewer.chooseThemeFile()
             }
+            Toggle("Hide title bar", isOn: hideTitleBarBinding)
         }
         .frame(minWidth: 360)
         .padding()
@@ -26,6 +27,13 @@ struct SettingsView: View {
         Binding(
             get: { viewer.themeID },
             set: { viewer.selectTheme($0) }
+        )
+    }
+
+    private var hideTitleBarBinding: Binding<Bool> {
+        Binding(
+            get: { viewer.hideTitleBar },
+            set: { viewer.setHideTitleBar($0) }
         )
     }
 }

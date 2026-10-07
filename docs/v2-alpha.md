@@ -99,7 +99,8 @@ toggle (overlay button, `⌘1` / `⌘2`). Palette from
 `.md` → load in-app. Normal Mac titlebar. Hyprland undecorated chrome
 stays in `linux/gtk.c`. Yabai tab-jump is held (#7). Mac Settings (`⌘,`) and View → Theme
 copy a bundled `examples/themes/*.toml` (Omarchy quattro + Paper) to
-`~/.config/omamd/colors.toml`.
+`~/.config/omamd/colors.toml`. Hide title bar (Ghostty-style, traffic
+lights stay) is a Settings / View toggle, on by default.
 
 ### PR 6 — iOS target
 
