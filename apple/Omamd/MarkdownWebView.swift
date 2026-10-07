@@ -192,8 +192,8 @@ struct WindowChrome: NSViewRepresentable {
                 window.styleMask.remove(.fullSizeContentView)
                 window.isMovableByWindowBackground = false
             }
-            setTrafficLights(window, hidden: hideTitleBar)
             hideTitlebarMaterial(window, hidden: hideTitleBar)
+            setTrafficLights(window, hidden: hideTitleBar)
             if let root = window.contentView {
                 WindowChrome.suppressScrollPockets(root, hidden: hideTitleBar)
             }
@@ -202,23 +202,31 @@ struct WindowChrome: NSViewRepresentable {
         func setTrafficLights(_ window: NSWindow, hidden: Bool) {
             let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
             for type in buttons {
-                window.standardWindowButton(type)?.isHidden = hidden
+                let button = window.standardWindowButton(type)
+                button?.isHidden = hidden
+                button?.alphaValue = hidden ? 0 : 1
+                button?.superview?.isHidden = hidden
+                button?.superview?.alphaValue = hidden ? 0 : 1
             }
             let bar = window.standardWindowButton(.closeButton)?.superview
-            bar?.isHidden = hidden
             bar?.superview?.isHidden = hidden
+            bar?.superview?.alphaValue = hidden ? 0 : 1
         }
 
         func hideTitlebarMaterial(_ window: NSWindow, hidden: Bool) {
-            guard hidden, let frame = window.contentView?.superview else { return }
+            guard let frame = window.contentView?.superview else { return }
             func walk(_ view: NSView) {
                 let typeName = String(describing: type(of: view))
-                if view is NSVisualEffectView || typeName.contains("Titlebar") {
-                    view.isHidden = true
-                    view.alphaValue = 0
+                if view is NSVisualEffectView
+                    || typeName.contains("Titlebar")
+                    || typeName.contains("ThemeWidget")
+                    || typeName.contains("ThemeClose")
+                    || typeName.contains("ThemeZoom") {
+                    view.isHidden = hidden
+                    view.alphaValue = hidden ? 0 : 1
                 }
                 if view.frame.height > 0 && view.frame.height <= 2 && view.frame.width > 40 {
-                    view.isHidden = true
+                    view.isHidden = hidden
                 }
                 view.subviews.forEach(walk)
             }
