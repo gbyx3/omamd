@@ -37,7 +37,7 @@ endif
 
 PREFIX ?= $(HOME)/.local
 
-.PHONY: all clean test test-cli test-gtk test-mac install
+.PHONY: all clean test test-cli test-gtk test-mac test-ios test-overlay install
 
 all: $(BIN)
 ifeq ($(HAVE_GTK),yes)
@@ -105,6 +105,14 @@ endif
 # Mac .app.  Not part of `make test` so Linux stays gcc-only.
 test-mac:
 	xcodebuild -project apple/Omamd.xcodeproj -scheme Omamd -configuration Debug -destination 'platform=macOS' build
+
+test-ios:
+	xcodebuild -project apple/Omamd.xcodeproj -scheme Omamd -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0' build
+
+# Overlay chrome (#9 theme drop-up, #10 Follow glyph). Fails until those
+# issues are fixed; not part of `make test`.
+test-overlay:
+	sh tests/overlay-chrome.sh
 
 install: $(BIN) pkgbuild/omamd.desktop pkgbuild/omamd.svg
 	install -Dm755 $(BIN) $(DESTDIR)$(PREFIX)/bin/omamd

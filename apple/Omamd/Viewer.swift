@@ -1,4 +1,6 @@
+#if os(macOS)
 import AppKit
+#endif
 import Darwin
 import Foundation
 import UniformTypeIdentifiers
@@ -19,9 +21,18 @@ final class Viewer: ObservableObject {
     @Published var followGeneration = 0
     @Published var themeID: String
     @Published var hideTitleBar: Bool
+    @Published var followEnabled: Bool
+    @Published var importer: Importer?
+    @Published var loadError: String?
+
+    enum Importer {
+        case markdown
+        case theme
+    }
 
     private static let themeIDKey = "omamd.themeID"
     private static let hideTitleBarKey = "omamd.hideTitleBar"
+    private static let followKey = "omamd.follow"
 
     let fontDir = BundledFonts.directory
     private(set) var docDir: URL?
@@ -29,6 +40,7 @@ final class Viewer: ObservableObject {
     private var themeWatch = PathWatcher()
     private var reloadWork: DispatchWorkItem?
     private var themeWork: DispatchWorkItem?
+    private var securityScoped: URL?
 
     init() {
         let stored = UserDefaults.standard.string(forKey: Self.themeIDKey)
@@ -39,17 +51,43 @@ final class Viewer: ObservableObject {
         } else {
             themeID = ThemeCatalog.defaultID
         }
+        #if os(iOS)
+        hideTitleBar = false
+        #else
         if UserDefaults.standard.object(forKey: Self.hideTitleBarKey) == nil {
             hideTitleBar = true
         } else {
             hideTitleBar = UserDefaults.standard.bool(forKey: Self.hideTitleBarKey)
+        }
+        #endif
+        if UserDefaults.standard.object(forKey: Self.followKey) == nil {
+            followEnabled = true
+        } else {
+            followEnabled = UserDefaults.standard.bool(forKey: Self.followKey)
         }
         showWelcome()
         watchTheme()
     }
 
     var previewHelp: String {
+        #if os(iOS)
+        mode == .preview ? "Source" : "Preview"
+        #else
         mode == .preview ? "Source (⌘2)" : "Preview (⌘1)"
+        #endif
+    }
+
+    var markdownTypes: [UTType] {
+        [
+            UTType(filenameExtension: "md") ?? .plainText,
+            UTType(filenameExtension: "markdown") ?? .plainText,
+            UTType(filenameExtension: "mdown") ?? .plainText,
+            .plainText,
+        ]
+    }
+
+    var themeTypes: [UTType] {
+        [UTType(filenameExtension: "toml") ?? .plainText]
     }
 
     func toggleMode() {
@@ -61,10 +99,20 @@ final class Viewer: ObservableObject {
         UserDefaults.standard.set(hide, forKey: Self.hideTitleBarKey)
     }
 
+    func setFollowEnabled(_ follow: Bool) {
+        followEnabled = follow
+        UserDefaults.standard.set(follow, forKey: Self.followKey)
+    }
+
+    func toggleFollow() {
+        setFollowEnabled(!followEnabled)
+    }
+
     func showWelcome() {
         fileURL = nil
         docDir = fontDir
         fileWatch.cancel()
+        releaseSecurityScope()
         if let url = Bundle.main.url(forResource: "welcome", withExtension: "md"),
            let text = try? String(contentsOf: url, encoding: .utf8) {
             setDocument(markdown: text, title: "welcome.md", follow: false)
@@ -78,20 +126,28 @@ final class Viewer: ObservableObject {
     }
 
     func openPanel() {
+        #if os(macOS)
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [
-            UTType(filenameExtension: "md") ?? .plainText,
-            UTType(filenameExtension: "markdown") ?? .plainText,
-            UTType(filenameExtension: "mdown") ?? .plainText,
-            .plainText,
-        ]
+        panel.allowedContentTypes = markdownTypes
         if let fileURL {
             panel.directoryURL = fileURL.deletingLastPathComponent()
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        load(url: url, follow: false)
+        #else
+        importer = .markdown
+        #endif
+    }
+
+    func loadImported(_ url: URL) {
+        let access = url.startAccessingSecurityScopedResource()
+        if access {
+            securityScoped?.stopAccessingSecurityScopedResource()
+            securityScoped = url
+        }
         load(url: url, follow: false)
     }
 
@@ -99,11 +155,7 @@ final class Viewer: ObservableObject {
         let path = url.path
         guard let text = try? String(contentsOf: url, encoding: .utf8) else {
             if follow { return }
-            NSAlert(error: NSError(
-                domain: "rocks.gurra.omamd",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Could not read:\n\(path)"]
-            )).runModal()
+            presentError("Could not read:\n\(path)")
             return
         }
         fileURL = url
@@ -132,7 +184,7 @@ final class Viewer: ObservableObject {
             }
             guard let url else { return }
             DispatchQueue.main.async {
-                self?.load(url: url, follow: false)
+                self?.loadImported(url)
             }
         }
         return true
@@ -146,7 +198,7 @@ final class Viewer: ObservableObject {
     }
 
     func applyTheme() {
-        let next = Omamd.palette()
+        let next = Omamd.palette(themePath: resolvedThemePath)
         guard next != palette else { return }
         palette = next
         render(follow: false)
@@ -173,7 +225,7 @@ final class Viewer: ObservableObject {
                 try FileManager.default.copyItem(at: theme.url, to: dest)
             }
         } catch {
-            NSAlert(error: error).runModal()
+            presentError(error.localizedDescription)
             return
         }
         applyTheme()
@@ -181,13 +233,25 @@ final class Viewer: ObservableObject {
     }
 
     func chooseThemeFile() {
+        #if os(macOS)
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [UTType(filenameExtension: "toml") ?? .plainText]
+        panel.allowedContentTypes = themeTypes
         panel.title = "Choose a colors.toml"
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        importTheme(url)
+        #else
+        importer = .theme
+        #endif
+    }
+
+    func importTheme(_ url: URL) {
+        let access = url.startAccessingSecurityScopedResource()
+        defer {
+            if access { url.stopAccessingSecurityScopedResource() }
+        }
         let dest = URL(fileURLWithPath: Omamd.userThemePath)
         do {
             try FileManager.default.createDirectory(
@@ -199,13 +263,22 @@ final class Viewer: ObservableObject {
             }
             try FileManager.default.copyItem(at: url, to: dest)
         } catch {
-            NSAlert(error: error).runModal()
+            presentError(error.localizedDescription)
             return
         }
         themeID = ThemeCatalog.customID
         UserDefaults.standard.set(themeID, forKey: Self.themeIDKey)
         applyTheme()
         watchTheme()
+    }
+
+    private var resolvedThemePath: String? {
+        #if os(iOS)
+        let path = Omamd.userThemePath
+        return FileManager.default.fileExists(atPath: path) ? path : nil
+        #else
+        nil
+        #endif
     }
 
     private func setDocument(markdown: String, title: String, follow: Bool) {
@@ -219,6 +292,7 @@ final class Viewer: ObservableObject {
         html = Omamd.page(
             markdown: markdown,
             title: title,
+            themePath: resolvedThemePath,
             fontDir: fontDir
         )
         if follow {
@@ -259,7 +333,7 @@ final class Viewer: ObservableObject {
         reloadWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            self.reload(follow: true)
+            self.reload(follow: self.followEnabled)
             if let fileURL {
                 self.watchFile(fileURL)
             }
@@ -282,6 +356,23 @@ final class Viewer: ObservableObject {
         let realPath = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
         let realDir = URL(fileURLWithPath: dir).resolvingSymlinksInPath().path
         return realPath == realDir || realPath.hasPrefix(realDir.hasSuffix("/") ? realDir : realDir + "/")
+    }
+
+    private func presentError(_ message: String) {
+        #if os(macOS)
+        NSAlert(error: NSError(
+            domain: "rocks.gurra.omamd",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )).runModal()
+        #else
+        loadError = message
+        #endif
+    }
+
+    private func releaseSecurityScope() {
+        securityScoped?.stopAccessingSecurityScopedResource()
+        securityScoped = nil
     }
 }
 

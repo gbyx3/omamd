@@ -10,6 +10,7 @@ struct OmamdApp: App {
     }
 
     var body: some Scene {
+        #if os(macOS)
         WindowGroup {
             ContentView()
                 .environmentObject(viewer)
@@ -48,12 +49,20 @@ struct OmamdApp: App {
             SettingsView()
                 .environmentObject(viewer)
         }
+        #else
+        WindowGroup {
+            ContentView()
+                .environmentObject(viewer)
+        }
+        #endif
     }
 
+    #if os(macOS)
     private var themeBinding: Binding<String> {
         Binding(
             get: { viewer.themeID },
             set: { viewer.selectTheme($0) }
         )
     }
+    #endif
 }

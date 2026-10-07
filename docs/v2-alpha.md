@@ -102,11 +102,13 @@ copy a bundled `examples/themes/*.toml` (Omarchy quattro + Paper) to
 `~/.config/omamd/colors.toml`. Hide title bar (Ghostty-style, traffic
 lights stay) is a Settings / View toggle, on by default.
 
-### PR 6 — iOS target
+### PR 6 — iOS target — started on this branch
 
-Same SwiftUI views, second destination. Document picker / Files.
-Palette: bundled `examples/colors.toml`, plus import. No `--term`.
-Share sheet for external links.
+Same SwiftUI views, second destination (`iphoneos` / `iphonesimulator`,
+iOS 17). Document picker / Files. Palette: bundled themes copied into
+Application Support. No `--term`. http(s) opens in Safari. `make test-ios`
+builds for the iPhone 17 simulator. Device install still needs a
+signing team.
 
 ### PR 7 — CI
 

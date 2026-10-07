@@ -89,9 +89,18 @@ enum Omamd {
     }
 
     static var userThemePath: String {
+        #if os(iOS)
+        let dir = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0].appendingPathComponent("omamd", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("colors.toml").path
+        #else
         var buf = [CChar](repeating: 0, count: 4096)
         theme_user_config_path(&buf, buf.count)
         return String(cString: buf)
+        #endif
     }
 }
 

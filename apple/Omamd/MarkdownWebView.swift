@@ -1,8 +1,12 @@
-import AppKit
 import SwiftUI
 import WebKit
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
-struct MarkdownWebView: NSViewRepresentable {
+struct MarkdownWebView {
     var html: String
     var baseURL: URL?
     var docDir: URL?
@@ -10,33 +14,28 @@ struct MarkdownWebView: NSViewRepresentable {
     var hideTitleBar: Bool
     var onOpenMarkdown: (URL) -> Void
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
+    func makeCoordinator() -> MarkdownWebCoordinator {
+        MarkdownWebCoordinator()
     }
 
-    func makeNSView(context: Context) -> WKWebView {
-        let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
-        view.navigationDelegate = context.coordinator
-        view.setValue(false, forKey: "drawsBackground")
-        WindowChrome.applyPageInsets(view, flushTop: hideTitleBar)
-        WindowChrome.suppressScrollPockets(view, hidden: hideTitleBar)
-        return view
-    }
-
-    func updateNSView(_ view: WKWebView, context: Context) {
-        context.coordinator.docDir = docDir
-        context.coordinator.onOpenMarkdown = onOpenMarkdown
-        context.coordinator.hideTitleBar = hideTitleBar
-        WindowChrome.applyPageInsets(view, flushTop: hideTitleBar)
-        WindowChrome.suppressScrollPockets(view, hidden: hideTitleBar)
-        if context.coordinator.html != html {
-            context.coordinator.html = html
-            context.coordinator.pendingFollow = followGeneration
+    static func load(_ html: String, into view: WKWebView, baseURL: URL?) {
+        #if os(iOS)
+        /* loadHTMLString + file:// @font-face stays blank on iOS.
+         * Write the page and load it as a file; Core Text already
+         * registered the bundled faces. */
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("omamd-page", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("index.html")
+        do {
+            try html.write(to: file, atomically: true, encoding: .utf8)
+            view.loadFileURL(file, allowingReadAccessTo: dir)
+        } catch {
             view.loadHTMLString(html, baseURL: baseURL)
-        } else if context.coordinator.scrolledFollow != followGeneration {
-            context.coordinator.scrolledFollow = followGeneration
-            Self.scrollToEnd(view)
         }
+        #else
+        view.loadHTMLString(html, baseURL: baseURL)
+        #endif
     }
 
     static func scrollToEnd(_ view: WKWebView) {
@@ -53,54 +52,155 @@ struct MarkdownWebView: NSViewRepresentable {
         )
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
-        var html = ""
-        var docDir: URL?
-        var onOpenMarkdown: (URL) -> Void = { _ in }
-        var pendingFollow: UInt = 0
-        var scrolledFollow: UInt = 0
-        var hideTitleBar = false
-
-        func webView(
-            _ webView: WKWebView,
-            decidePolicyFor action: WKNavigationAction,
-            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
-        ) {
-            guard action.navigationType == .linkActivated else {
-                decisionHandler(.allow)
-                return
-            }
-            guard let url = action.request.url else {
-                decisionHandler(.cancel)
-                return
-            }
-            if let scheme = url.scheme, ["http", "https", "mailto"].contains(scheme) {
-                NSWorkspace.shared.open(url)
-                decisionHandler(.cancel)
-                return
-            }
-            if url.isFileURL, let docDir, Omamd.isMarkdown(url: url) {
-                let path = url.path
-                let dir = docDir.path
-                let realPath = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-                let realDir = URL(fileURLWithPath: dir).resolvingSymlinksInPath().path
-                if realPath == realDir || realPath.hasPrefix(realDir.hasSuffix("/") ? realDir : realDir + "/") {
-                    onOpenMarkdown(url)
-                }
-            }
-            decisionHandler(.cancel)
+    fileprivate func bind(_ view: WKWebView, context: BoundContext) {
+        let coordinator = context.coordinator
+        coordinator.docDir = docDir
+        coordinator.onOpenMarkdown = onOpenMarkdown
+        coordinator.hideTitleBar = hideTitleBar
+        coordinator.applyChrome(view)
+        if coordinator.html != html {
+            coordinator.html = html
+            coordinator.pendingFollow = followGeneration
+            Self.load(html, into: view, baseURL: baseURL)
+        } else if coordinator.scrolledFollow != followGeneration {
+            coordinator.scrolledFollow = followGeneration
+            Self.scrollToEnd(view)
         }
+    }
 
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            WindowChrome.applyPageInsets(webView, flushTop: hideTitleBar)
-            WindowChrome.suppressScrollPockets(webView, hidden: hideTitleBar)
-            guard pendingFollow != scrolledFollow else { return }
-            scrolledFollow = pendingFollow
-            MarkdownWebView.scrollToEnd(webView)
-        }
+    fileprivate struct BoundContext {
+        var coordinator: MarkdownWebCoordinator
     }
 }
 
+#if os(macOS)
+extension MarkdownWebView: NSViewRepresentable {
+    func makeNSView(context: Context) -> WKWebView {
+        let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        view.navigationDelegate = context.coordinator
+        view.setValue(false, forKey: "drawsBackground")
+        context.coordinator.applyChrome(view)
+        return view
+    }
+
+    func updateNSView(_ view: WKWebView, context: Context) {
+        bind(view, context: BoundContext(coordinator: context.coordinator))
+    }
+}
+#else
+final class MarkdownWebContainer: UIView {
+    let webView: WKWebView
+
+    init(webView: WKWebView) {
+        self.webView = webView
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        addSubview(webView)
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            webView.topAnchor.constraint(equalTo: topAnchor),
+            webView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            webView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { nil }
+}
+
+extension MarkdownWebView: UIViewRepresentable {
+    func makeUIView(context: Context) -> MarkdownWebContainer {
+        let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        view.navigationDelegate = context.coordinator
+        view.isOpaque = false
+        view.backgroundColor = .clear
+        view.scrollView.backgroundColor = .clear
+        view.scrollView.contentInsetAdjustmentBehavior = .never
+        view.scrollView.alwaysBounceVertical = true
+        if #available(iOS 16.4, *) {
+            view.isInspectable = true
+        }
+        context.coordinator.applyChrome(view)
+        return MarkdownWebContainer(webView: view)
+    }
+
+    func updateUIView(_ container: MarkdownWebContainer, context: Context) {
+        bind(container.webView, context: BoundContext(coordinator: context.coordinator))
+    }
+}
+#endif
+
+final class MarkdownWebCoordinator: NSObject, WKNavigationDelegate {
+    var html = ""
+    var docDir: URL?
+    var onOpenMarkdown: (URL) -> Void = { _ in }
+    var pendingFollow: UInt = 0
+    var scrolledFollow: UInt = 0
+    var hideTitleBar = false
+
+    func applyChrome(_ webView: WKWebView) {
+        #if os(macOS)
+        WindowChrome.applyPageInsets(webView, flushTop: hideTitleBar)
+        WindowChrome.suppressScrollPockets(webView, hidden: hideTitleBar)
+        #else
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
+        if #available(iOS 26.0, *) {
+            webView.obscuredContentInsets = .zero
+        }
+        #endif
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor action: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        guard action.navigationType == .linkActivated else {
+            decisionHandler(.allow)
+            return
+        }
+        guard let url = action.request.url else {
+            decisionHandler(.cancel)
+            return
+        }
+        if let scheme = url.scheme, ["http", "https", "mailto"].contains(scheme) {
+            #if os(macOS)
+            NSWorkspace.shared.open(url)
+            #else
+            UIApplication.shared.open(url)
+            #endif
+            decisionHandler(.cancel)
+            return
+        }
+        if url.isFileURL, let docDir, Omamd.isMarkdown(url: url) {
+            let path = url.path
+            let dir = docDir.path
+            let realPath = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            let realDir = URL(fileURLWithPath: dir).resolvingSymlinksInPath().path
+            if realPath == realDir || realPath.hasPrefix(realDir.hasSuffix("/") ? realDir : realDir + "/") {
+                onOpenMarkdown(url)
+            }
+        }
+        decisionHandler(.cancel)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        applyChrome(webView)
+        guard pendingFollow != scrolledFollow else { return }
+        scrolledFollow = pendingFollow
+        MarkdownWebView.scrollToEnd(webView)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        NSLog("omamd webview fail: \(error.localizedDescription)")
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        NSLog("omamd webview provisional fail: \(error.localizedDescription)")
+    }
+}
+
+#if os(macOS)
 struct WindowChrome: NSViewRepresentable {
     var title: String
     var hideTitleBar: Bool
@@ -322,3 +422,4 @@ struct WindowChrome: NSViewRepresentable {
         walk(root)
     }
 }
+#endif
