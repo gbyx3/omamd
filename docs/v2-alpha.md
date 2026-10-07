@@ -91,12 +91,13 @@ copied into the app bundle and registered with Core Text.
 Viewer (`WindowGroup`), not `DocumentGroup`. The `.app` does not
 link `cli.c`, `term.c`, or GTK. `make test-mac` runs `xcodebuild`.
 
-### PR 5 — Mac viewer behaviour
+### PR 5 — Mac viewer behaviour — done on this branch
 
 Open/reload (`NSOpenPanel` + dispatch source on mtime). Preview / source
-toggle. Palette from `~/.config/omamd/colors.toml`. Navigation: http(s)
-→ Safari; relative `.md` → load in-app. Normal Mac titlebar. Hyprland
-undecorated chrome stays in `linux/gtk.c`.
+toggle (overlay button, `⌘1` / `⌘2`). Palette from
+`~/.config/omamd/colors.toml`. Navigation: http(s) → Safari; relative
+`.md` → load in-app. Normal Mac titlebar. Hyprland undecorated chrome
+stays in `linux/gtk.c`. Yabai tab-jump is held (#7).
 
 ### PR 6 — iOS target
 

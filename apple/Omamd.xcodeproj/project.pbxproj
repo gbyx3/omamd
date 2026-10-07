@@ -11,6 +11,7 @@
 		01A000000000000000000081 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000031 /* ContentView.swift */; };
 		01A000000000000000000082 /* MarkdownWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000032 /* MarkdownWebView.swift */; };
 		01A000000000000000000083 /* OmamdCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000033 /* OmamdCore.swift */; };
+		01A00000000000000000008A /* Viewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000035 /* Viewer.swift */; };
 		01A000000000000000000084 /* markdown.c in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000040 /* markdown.c */; };
 		01A000000000000000000085 /* theme.c in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000041 /* theme.c */; };
 		01A000000000000000000086 /* html.c in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000042 /* html.c */; };
@@ -25,6 +26,7 @@
 		01A000000000000000000031 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		01A000000000000000000032 /* MarkdownWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownWebView.swift; sourceTree = "<group>"; };
 		01A000000000000000000033 /* OmamdCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OmamdCore.swift; sourceTree = "<group>"; };
+		01A000000000000000000035 /* Viewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Viewer.swift; sourceTree = "<group>"; };
 		01A000000000000000000034 /* Omamd-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Omamd-Bridging-Header.h"; sourceTree = "<group>"; };
 		01A000000000000000000040 /* markdown.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = markdown.c; sourceTree = "<group>"; };
 		01A000000000000000000041 /* theme.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = theme.c; sourceTree = "<group>"; };
@@ -73,6 +75,7 @@
 				01A000000000000000000031 /* ContentView.swift */,
 				01A000000000000000000032 /* MarkdownWebView.swift */,
 				01A000000000000000000033 /* OmamdCore.swift */,
+				01A000000000000000000035 /* Viewer.swift */,
 				01A000000000000000000034 /* Omamd-Bridging-Header.h */,
 			);
 			path = Omamd;
@@ -175,6 +178,7 @@
 				01A000000000000000000081 /* ContentView.swift in Sources */,
 				01A000000000000000000082 /* MarkdownWebView.swift in Sources */,
 				01A000000000000000000083 /* OmamdCore.swift in Sources */,
+				01A00000000000000000008A /* Viewer.swift in Sources */,
 				01A000000000000000000084 /* markdown.c in Sources */,
 				01A000000000000000000085 /* theme.c in Sources */,
 				01A000000000000000000086 /* html.c in Sources */,
