@@ -120,5 +120,14 @@ struct WindowChrome: NSViewRepresentable {
             window.styleMask.remove(.fullSizeContentView)
             window.isMovableByWindowBackground = false
         }
+        setTrafficLights(window, hidden: hideTitleBar)
+    }
+
+    static func setTrafficLights(_ window: NSWindow, hidden: Bool) {
+        let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        for type in buttons {
+            window.standardWindowButton(type)?.isHidden = hidden
+        }
+        window.standardWindowButton(.closeButton)?.superview?.isHidden = hidden
     }
 }
