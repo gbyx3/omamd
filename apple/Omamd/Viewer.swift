@@ -123,7 +123,9 @@ final class Viewer: ObservableObject {
     }
 
     func applyTheme() {
-        palette = Omamd.palette()
+        let next = Omamd.palette()
+        guard next != palette else { return }
+        palette = next
         render(follow: false)
     }
 
@@ -152,10 +154,26 @@ final class Viewer: ObservableObject {
     }
 
     private func watchTheme() {
-        let file = URL(fileURLWithPath: Omamd.userThemePath)
-        themeWatch.watch(file: file, directory: file.deletingLastPathComponent()) { [weak self] in
+        themeWatch.watch(paths: themeWatchPaths()) { [weak self] in
             self?.scheduleThemeReload()
         }
+    }
+
+    /* colors.toml, then ~/.config/omamd, then ~/.config so the first
+     * paste of a palette is picked up without a restart. */
+    private func themeWatchPaths() -> [URL] {
+        let file = URL(fileURLWithPath: Omamd.userThemePath)
+        let dir = file.deletingLastPathComponent()
+        let config = dir.deletingLastPathComponent()
+        let fm = FileManager.default
+        var urls: [URL] = []
+        if fm.fileExists(atPath: file.path) { urls.append(file) }
+        if fm.fileExists(atPath: dir.path) {
+            urls.append(dir)
+        } else if fm.fileExists(atPath: config.path) {
+            urls.append(config)
+        }
+        return urls
     }
 
     private func scheduleFileReload() {
@@ -197,9 +215,21 @@ final class PathWatcher {
     }
 
     func watch(file: URL?, directory: URL?, handler: @escaping () -> Void) {
+        var paths: [URL] = []
+        if let file { paths.append(file) }
+        if let directory { paths.append(directory) }
+        watch(paths: paths, handler: handler)
+    }
+
+    func watch(paths: [URL], handler: @escaping () -> Void) {
         cancel()
-        if let file { add(file, handler) }
-        if let directory { add(directory, handler) }
+        var seen = Set<String>()
+        for url in paths {
+            let path = url.path
+            guard !seen.contains(path) else { continue }
+            seen.insert(path)
+            add(url, handler)
+        }
     }
 
     private func add(_ url: URL, _ handler: @escaping () -> Void) {

@@ -95,7 +95,7 @@ enum Omamd {
     }
 }
 
-struct OmamdPalette {
+struct OmamdPalette: Equatable {
     var bg: String
     var fg: String
     var muted: String
