@@ -7,6 +7,7 @@ struct MarkdownWebView: NSViewRepresentable {
     var baseURL: URL?
     var docDir: URL?
     var followGeneration: UInt
+    var hideTitleBar: Bool
     var onOpenMarkdown: (URL) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -17,16 +18,17 @@ struct MarkdownWebView: NSViewRepresentable {
         let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
         view.navigationDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
-        if view.responds(to: Selector(("setAutomaticallyAdjustsContentInsets:"))) {
-            view.setValue(false, forKey: "automaticallyAdjustsContentInsets")
-        }
-        WindowChrome.suppressScrollPockets(view, hidden: true)
+        WindowChrome.applyPageInsets(view, flushTop: hideTitleBar)
+        WindowChrome.suppressScrollPockets(view, hidden: hideTitleBar)
         return view
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
         context.coordinator.docDir = docDir
         context.coordinator.onOpenMarkdown = onOpenMarkdown
+        context.coordinator.hideTitleBar = hideTitleBar
+        WindowChrome.applyPageInsets(view, flushTop: hideTitleBar)
+        WindowChrome.suppressScrollPockets(view, hidden: hideTitleBar)
         if context.coordinator.html != html {
             context.coordinator.html = html
             context.coordinator.pendingFollow = followGeneration
@@ -35,7 +37,6 @@ struct MarkdownWebView: NSViewRepresentable {
             context.coordinator.scrolledFollow = followGeneration
             Self.scrollToEnd(view)
         }
-        WindowChrome.suppressScrollPockets(view, hidden: true)
     }
 
     static func scrollToEnd(_ view: WKWebView) {
@@ -58,6 +59,7 @@ struct MarkdownWebView: NSViewRepresentable {
         var onOpenMarkdown: (URL) -> Void = { _ in }
         var pendingFollow: UInt = 0
         var scrolledFollow: UInt = 0
+        var hideTitleBar = false
 
         func webView(
             _ webView: WKWebView,
@@ -90,7 +92,8 @@ struct MarkdownWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            WindowChrome.suppressScrollPockets(webView, hidden: true)
+            WindowChrome.applyPageInsets(webView, flushTop: hideTitleBar)
+            WindowChrome.suppressScrollPockets(webView, hidden: hideTitleBar)
             guard pendingFollow != scrolledFollow else { return }
             scrolledFollow = pendingFollow
             MarkdownWebView.scrollToEnd(webView)
@@ -196,6 +199,14 @@ struct WindowChrome: NSViewRepresentable {
             setTrafficLights(window, hidden: hideTitleBar)
             if let root = window.contentView {
                 WindowChrome.suppressScrollPockets(root, hidden: hideTitleBar)
+                WindowChrome.flushWebInsets(root, flushTop: hideTitleBar)
+            }
+            /* WebKit reapplies title-bar insets after the style mask
+             * change; flush once more on the next turn. */
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let root = self.window?.contentView else { return }
+                WindowChrome.suppressScrollPockets(root, hidden: self.hideTitleBar)
+                WindowChrome.flushWebInsets(root, flushTop: self.hideTitleBar)
             }
         }
 
@@ -234,6 +245,55 @@ struct WindowChrome: NSViewRepresentable {
                 walk(sub)
             }
         }
+    }
+
+    /* A titled window still reports a ~28–32pt title-bar overlay.
+     * Zero WKWebView's layout insets so the page sits under the
+     * window curve instead of leaving an empty strip. */
+    static func applyPageInsets(_ webView: WKWebView, flushTop: Bool) {
+        if #available(macOS 26.0, *) {
+            webView.obscuredContentInsets = NSEdgeInsets()
+        }
+        if webView.responds(to: Selector(("setAutomaticallyAdjustsContentInsets:"))) {
+            webView.setValue(false, forKey: "automaticallyAdjustsContentInsets")
+        }
+        func walk(_ view: NSView) {
+            if let scroll = view as? NSScrollView {
+                scroll.automaticallyAdjustsContentInsets = false
+                if flushTop {
+                    scroll.contentInsets = NSEdgeInsets()
+                    scroll.scrollerInsets = NSEdgeInsets()
+                    scroll.contentView.automaticallyAdjustsContentInsets = false
+                    scroll.contentView.contentInsets = NSEdgeInsets()
+                }
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(webView)
+        if flushTop {
+            let titlebar = webView.window.map { window -> CGFloat in
+                guard let content = window.contentView else { return 0 }
+                return max(0, content.bounds.height - window.contentLayoutRect.height)
+            } ?? 0
+            webView.additionalSafeAreaInsets = NSEdgeInsets(
+                top: -titlebar,
+                left: 0,
+                bottom: 0,
+                right: 0
+            )
+        } else {
+            webView.additionalSafeAreaInsets = NSEdgeInsets()
+        }
+    }
+
+    static func flushWebInsets(_ root: NSView, flushTop: Bool) {
+        func walk(_ view: NSView) {
+            if let web = view as? WKWebView {
+                applyPageInsets(web, flushTop: flushTop)
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(root)
     }
 
     /* macOS 26 scroll pockets paint a 32pt material strip in hidden
