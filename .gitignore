@@ -9,4 +9,6 @@
 xcuserdata/
 *.xcuserstate
 .DS_Store
+examples/colors-gurra.toml
+gurka.html
 
