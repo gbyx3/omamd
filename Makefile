@@ -58,27 +58,32 @@ clean:
 	rm -rf $(BUILDDIR)
 
 # --html and --term, no GTK.  This is `make test` on a Mac.
+# Empty HOME so a developer colors.toml cannot shadow the default palette.
+TEST_HOME := $(BUILDDIR)/test-home
+TEST_ENV  := HOME=$(TEST_HOME) XDG_CONFIG_HOME=$(TEST_HOME)/.config
 test-cli: $(CLI_BIN)
-	$(CLI_BIN) --html examples/welcome.md | grep -q '<h1>'
-	$(CLI_BIN) --html examples/welcome.md | grep -q '<code>'
-	$(CLI_BIN) --html examples/welcome.md | grep -q '<table>'
-	$(CLI_BIN) --html examples/welcome.md | grep -q '<input type="checkbox"'
-	$(CLI_BIN) --html examples/security.md | grep -q 'href="https://example.com/ok"'
-	$(CLI_BIN) --html examples/security.md | grep -q 'src="https://example.com/pix.png"'
-	! $(CLI_BIN) --html examples/security.md | grep -q 'javascript:'
-	! $(CLI_BIN) --html examples/security.md | grep -q 'file:///etc/passwd'
-	! $(CLI_BIN) --html examples/security.md | grep -q 'data:text/html'
-	! $(CLI_BIN) --html examples/security.md | grep -q 'src="/etc/passwd"'
-	$(CLI_BIN) --term examples/welcome.md | grep -q 'Welcome'
-	! $(CLI_BIN) --term examples/welcome.md | grep -q '<h1>'
-	$(CLI_BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#fff8ee'
-	$(CLI_BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#c81e1e'
-	! $(CLI_BIN) --html examples/welcome.md | grep -q '#fff8ee'
-	$(CLI_BIN) --html examples/welcome.md | grep -q '#1e1e2e'
-	$(CLI_BIN) --theme /no/such/omamd-theme.toml --html examples/welcome.md | grep -q '<h1>'
-	$(CLI_BIN) --html examples/welcome.md | grep -q '@font-face'
-	$(CLI_BIN) --html examples/welcome.md | grep -q 'file://'
-	$(CLI_BIN) --version | grep -q 'omamd'
+	mkdir -p $(TEST_HOME)
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '<h1>'
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '<code>'
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '<table>'
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '<input type="checkbox"'
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q 'grid-column: 2'
+	$(TEST_ENV) $(CLI_BIN) --html examples/security.md | grep -q 'href="https://example.com/ok"'
+	$(TEST_ENV) $(CLI_BIN) --html examples/security.md | grep -q 'src="https://example.com/pix.png"'
+	! $(TEST_ENV) $(CLI_BIN) --html examples/security.md | grep -q 'javascript:'
+	! $(TEST_ENV) $(CLI_BIN) --html examples/security.md | grep -q 'file:///etc/passwd'
+	! $(TEST_ENV) $(CLI_BIN) --html examples/security.md | grep -q 'data:text/html'
+	! $(TEST_ENV) $(CLI_BIN) --html examples/security.md | grep -q 'src="/etc/passwd"'
+	$(TEST_ENV) $(CLI_BIN) --term examples/welcome.md | grep -q 'Welcome'
+	! $(TEST_ENV) $(CLI_BIN) --term examples/welcome.md | grep -q '<h1>'
+	$(TEST_ENV) $(CLI_BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#fff8ee'
+	$(TEST_ENV) $(CLI_BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#c81e1e'
+	! $(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '#fff8ee'
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '#1e1e2e'
+	$(TEST_ENV) $(CLI_BIN) --theme /no/such/omamd-theme.toml --html examples/welcome.md | grep -q '<h1>'
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '@font-face'
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q 'file://'
+	$(TEST_ENV) $(CLI_BIN) --version | grep -q 'omamd'
 	@echo "ok (cli)"
 
 # GTK binary still dispatches --html / --term through cli.c.

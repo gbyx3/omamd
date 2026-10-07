@@ -293,8 +293,20 @@ char *omamd_css(const Palette *p)
         "tr:nth-child(even) td { background: color-mix(in srgb, var(--surface) 35%, transparent); }\n"
         "img { max-width: 100%; height: auto; border-radius: 6px; }\n"
         "li > p { margin: 0.25em 0; }\n"
-        "li:has(> input[type=checkbox]) { list-style: none; margin-left: -1.3em; }\n"
-        "input[type=checkbox] { margin-right: 0.45em; }\n"
+        "li:has(> input[type=checkbox]) {\n"
+        "  list-style: none;\n"
+        "  margin-left: -1.3em;\n"
+        "  display: grid;\n"
+        "  grid-template-columns: auto 1fr;\n"
+        "  column-gap: 0.45em;\n"
+        "  align-items: baseline;\n"
+        "}\n"
+        "li:has(> input[type=checkbox]) > input[type=checkbox] {\n"
+        "  margin: 0;\n"
+        "  width: 0.9em;\n"
+        "  height: 0.9em;\n"
+        "}\n"
+        "li:has(> input[type=checkbox]) > :not(input) { grid-column: 2; }\n"
         "::selection { background: var(--sel); }\n");
     return buf_take(&b);
 }
