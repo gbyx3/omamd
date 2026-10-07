@@ -17,6 +17,9 @@ final class Viewer: ObservableObject {
     @Published var fileURL: URL?
     @Published var palette = Omamd.palette()
     @Published var followGeneration = 0
+    @Published var themeID: String
+
+    private static let themeIDKey = "omamd.themeID"
 
     let fontDir = BundledFonts.directory
     private(set) var docDir: URL?
@@ -26,6 +29,14 @@ final class Viewer: ObservableObject {
     private var themeWork: DispatchWorkItem?
 
     init() {
+        let stored = UserDefaults.standard.string(forKey: Self.themeIDKey)
+        if let stored {
+            themeID = stored
+        } else if FileManager.default.fileExists(atPath: Omamd.userThemePath) {
+            themeID = ThemeCatalog.customID
+        } else {
+            themeID = ThemeCatalog.defaultID
+        }
         showWelcome()
         watchTheme()
     }
@@ -127,6 +138,62 @@ final class Viewer: ObservableObject {
         guard next != palette else { return }
         palette = next
         render(follow: false)
+    }
+
+    func selectTheme(_ id: String) {
+        if id == ThemeCatalog.customID { return }
+        themeID = id
+        UserDefaults.standard.set(id, forKey: Self.themeIDKey)
+        let dest = URL(fileURLWithPath: Omamd.userThemePath)
+        do {
+            try FileManager.default.createDirectory(
+                at: dest.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            if id == ThemeCatalog.defaultID {
+                if FileManager.default.fileExists(atPath: dest.path) {
+                    try FileManager.default.removeItem(at: dest)
+                }
+            } else if let theme = ThemeCatalog.bundled.first(where: { $0.id == id }) {
+                if FileManager.default.fileExists(atPath: dest.path) {
+                    try FileManager.default.removeItem(at: dest)
+                }
+                try FileManager.default.copyItem(at: theme.url, to: dest)
+            }
+        } catch {
+            NSAlert(error: error).runModal()
+            return
+        }
+        applyTheme()
+        watchTheme()
+    }
+
+    func chooseThemeFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType(filenameExtension: "toml") ?? .plainText]
+        panel.title = "Choose a colors.toml"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let dest = URL(fileURLWithPath: Omamd.userThemePath)
+        do {
+            try FileManager.default.createDirectory(
+                at: dest.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            if FileManager.default.fileExists(atPath: dest.path) {
+                try FileManager.default.removeItem(at: dest)
+            }
+            try FileManager.default.copyItem(at: url, to: dest)
+        } catch {
+            NSAlert(error: error).runModal()
+            return
+        }
+        themeID = ThemeCatalog.customID
+        UserDefaults.standard.set(themeID, forKey: Self.themeIDKey)
+        applyTheme()
+        watchTheme()
     }
 
     private func setDocument(markdown: String, title: String, follow: Bool) {

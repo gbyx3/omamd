@@ -29,7 +29,28 @@ struct OmamdApp: App {
                     .keyboardShortcut("1", modifiers: .command)
                 Button("Source") { viewer.mode = .source }
                     .keyboardShortcut("2", modifiers: .command)
+                Divider()
+                Picker("Theme", selection: themeBinding) {
+                    Text("Default").tag(ThemeCatalog.defaultID)
+                    ForEach(ThemeCatalog.bundled) { theme in
+                        Text(theme.name).tag(theme.id)
+                    }
+                    if viewer.themeID == ThemeCatalog.customID {
+                        Text("Custom").tag(ThemeCatalog.customID)
+                    }
+                }
             }
         }
+        Settings {
+            SettingsView()
+                .environmentObject(viewer)
+        }
+    }
+
+    private var themeBinding: Binding<String> {
+        Binding(
+            get: { viewer.themeID },
+            set: { viewer.selectTheme($0) }
+        )
     }
 }

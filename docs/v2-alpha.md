@@ -97,7 +97,9 @@ Open/reload (`NSOpenPanel` + dispatch source on mtime). Preview / source
 toggle (overlay button, `⌘1` / `⌘2`). Palette from
 `~/.config/omamd/colors.toml`. Navigation: http(s) → Safari; relative
 `.md` → load in-app. Normal Mac titlebar. Hyprland undecorated chrome
-stays in `linux/gtk.c`. Yabai tab-jump is held (#7).
+stays in `linux/gtk.c`. Yabai tab-jump is held (#7). Mac Settings (`⌘,`) and View → Theme
+copy a bundled `examples/themes/*.toml` (Omarchy quattro + Paper) to
+`~/.config/omamd/colors.toml`.
 
 ### PR 6 — iOS target
 

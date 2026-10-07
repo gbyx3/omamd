@@ -84,6 +84,10 @@ test-cli: $(CLI_BIN)
 	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '@font-face'
 	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q 'file://'
 	$(TEST_ENV) $(CLI_BIN) --version | grep -q 'omamd'
+	@for f in examples/themes/*.toml; do \
+		grep -q '^background =' $$f && grep -q '^foreground =' $$f || exit 1; \
+		$(TEST_ENV) $(CLI_BIN) --theme $$f --html examples/welcome.md | grep -q '<h1>' || exit 1; \
+	done
 	@echo "ok (cli)"
 
 # GTK binary still dispatches --html / --term through cli.c.
@@ -112,5 +116,7 @@ install: $(BIN) pkgbuild/omamd.desktop pkgbuild/omamd.svg
 	install -Dm644 fonts/iAWriterMonoS-Bold.ttf $(DESTDIR)$(PREFIX)/share/omamd/fonts/iAWriterMonoS-Bold.ttf
 	install -Dm644 fonts/iAWriterMonoS-BoldItalic.ttf $(DESTDIR)$(PREFIX)/share/omamd/fonts/iAWriterMonoS-BoldItalic.ttf
 	install -Dm644 examples/colors.toml $(DESTDIR)$(PREFIX)/share/omamd/colors.toml
+	install -d $(DESTDIR)$(PREFIX)/share/omamd/themes
+	install -m644 examples/themes/*.toml $(DESTDIR)$(PREFIX)/share/omamd/themes
 	-update-desktop-database $(DESTDIR)$(PREFIX)/share/applications
 	-gtk-update-icon-cache -q -t -f $(DESTDIR)$(PREFIX)/share/icons/hicolor

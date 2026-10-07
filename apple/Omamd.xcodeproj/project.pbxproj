@@ -12,12 +12,15 @@
 		01A000000000000000000082 /* MarkdownWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000032 /* MarkdownWebView.swift */; };
 		01A000000000000000000083 /* OmamdCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000033 /* OmamdCore.swift */; };
 		01A00000000000000000008A /* Viewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000035 /* Viewer.swift */; };
+		01A00000000000000000008C /* ThemeCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000036 /* ThemeCatalog.swift */; };
+		01A00000000000000000008D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000037 /* SettingsView.swift */; };
 		01A000000000000000000084 /* markdown.c in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000040 /* markdown.c */; };
 		01A000000000000000000085 /* theme.c in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000041 /* theme.c */; };
 		01A000000000000000000086 /* html.c in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000042 /* html.c */; };
 		01A000000000000000000087 /* util.c in Sources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000043 /* util.c */; };
 		01A000000000000000000088 /* fonts in Resources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000050 /* fonts */; };
 		01A000000000000000000089 /* welcome.md in Resources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000051 /* welcome.md */; };
+		01A00000000000000000008B /* themes in Resources */ = {isa = PBXBuildFile; fileRef = 01A000000000000000000052 /* themes */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +30,8 @@
 		01A000000000000000000032 /* MarkdownWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownWebView.swift; sourceTree = "<group>"; };
 		01A000000000000000000033 /* OmamdCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OmamdCore.swift; sourceTree = "<group>"; };
 		01A000000000000000000035 /* Viewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Viewer.swift; sourceTree = "<group>"; };
+		01A000000000000000000036 /* ThemeCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeCatalog.swift; sourceTree = "<group>"; };
+		01A000000000000000000037 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		01A000000000000000000034 /* Omamd-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Omamd-Bridging-Header.h"; sourceTree = "<group>"; };
 		01A000000000000000000040 /* markdown.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = markdown.c; sourceTree = "<group>"; };
 		01A000000000000000000041 /* theme.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = theme.c; sourceTree = "<group>"; };
@@ -39,6 +44,7 @@
 		01A000000000000000000048 /* util.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = util.h; sourceTree = "<group>"; };
 		01A000000000000000000050 /* fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = fonts; path = ../fonts; sourceTree = "<group>"; };
 		01A000000000000000000051 /* welcome.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = welcome.md; path = ../examples/welcome.md; sourceTree = "<group>"; };
+		01A000000000000000000052 /* themes */ = {isa = PBXFileReference; lastKnownFileType = folder; name = themes; path = ../examples/themes; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -76,6 +82,8 @@
 				01A000000000000000000032 /* MarkdownWebView.swift */,
 				01A000000000000000000033 /* OmamdCore.swift */,
 				01A000000000000000000035 /* Viewer.swift */,
+				01A000000000000000000036 /* ThemeCatalog.swift */,
+				01A000000000000000000037 /* SettingsView.swift */,
 				01A000000000000000000034 /* Omamd-Bridging-Header.h */,
 			);
 			path = Omamd;
@@ -103,6 +111,7 @@
 			children = (
 				01A000000000000000000050 /* fonts */,
 				01A000000000000000000051 /* welcome.md */,
+				01A000000000000000000052 /* themes */,
 			);
 			name = Resources;
 			sourceTree = "<group>";
@@ -166,6 +175,7 @@
 			files = (
 				01A000000000000000000088 /* fonts in Resources */,
 				01A000000000000000000089 /* welcome.md in Resources */,
+				01A00000000000000000008B /* themes in Resources */,
 			);
 		};
 /* End PBXResourcesBuildPhase section */
@@ -179,6 +189,8 @@
 				01A000000000000000000082 /* MarkdownWebView.swift in Sources */,
 				01A000000000000000000083 /* OmamdCore.swift in Sources */,
 				01A00000000000000000008A /* Viewer.swift in Sources */,
+				01A00000000000000000008C /* ThemeCatalog.swift in Sources */,
+				01A00000000000000000008D /* SettingsView.swift in Sources */,
 				01A000000000000000000084 /* markdown.c in Sources */,
 				01A000000000000000000085 /* theme.c in Sources */,
 				01A000000000000000000086 /* html.c in Sources */,

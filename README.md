@@ -179,5 +179,6 @@ Written in C, commented for someone new to the language.
 13. `pkgbuild/` — Arch package, desktop entry, and icon
 14. `fonts/` — iA Writer Mono S (SIL Open Font License 1.1; see `fonts/OFL.txt`)
 15. `examples/colors.toml` — a paste-ready palette
+16. `examples/themes/` — Omarchy quattro `colors.toml` files plus Paper, for the Mac theme picker
 
 The preview and source views use the same iA Writer Mono that omawrite bundles. It is an OFL font: we may bundle and redistribute it with the app; we do not rename it.
