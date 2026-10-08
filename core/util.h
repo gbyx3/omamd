@@ -8,7 +8,7 @@
 
 #include <stddef.h>
 
-#define OMAMD_VERSION "0.1"
+#define OMAMD_VERSION "0.2"
 #define OMAMD_MAX_FILE_BYTES (32u * 1024u * 1024u)
 
 /* malloc'd bytes; caller free()s.  NULL on error or a file larger

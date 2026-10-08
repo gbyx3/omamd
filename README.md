@@ -2,6 +2,12 @@
 
 A Markdown renderer for the agentic era. Point it at `.md` files agents write — chat exports, generated docs, READMEs, notes — and it follows your palette, reloads as the file grows, renders in the terminal over SSH, and converts to HTML when you need a page.
 
+Linux (GTK), macOS, and iOS share one C core. The floating overlay is the same on every shell: preview/source top-right, Open / Theme / Follow bottom-right.
+
+<p align="center">
+  <img src="docs/iphone.png" alt="omamd on iPhone" width="280">
+</p>
+
 **Repo:** https://github.com/gbyx3/omamd
 
 ## Install via an agent
@@ -85,7 +91,7 @@ Later updates: `git pull && ./bin/build && make install` from the clone.
 omamd notes.md
 ```
 
-Bare window, no title bar. The round button in the top-right switches Preview and Source and stays put while you scroll. If the file changes on disk — an agent appending to it, or a save from another editor — omamd reloads and eases down to the new bottom. Drop a `.md` on the window to open it. Relative links to other Markdown files in the same folder open in omamd; `http`/`https` links go to the browser.
+Bare window, no title bar. The round button in the top-right switches Preview and Source and stays put while you scroll. Open, Theme, and Follow sit in the bottom-right corner. Follow is a pin: when it is on, a file change eases down to the new bottom. Drop a `.md` on the window to open it. Relative links to other Markdown files in the same folder open in omamd; `http`/`https` links go to the browser.
 
 The preview uses the active palette (see [Palette](#palette)) and reloads when that file changes.
 
@@ -95,6 +101,21 @@ The preview uses the active palette (see [Palette](#palette)) and reloads when t
 | `Ctrl+R` / `F5` | Reload |
 | `Ctrl+1` / `Ctrl+2` | Preview / Source |
 | `Ctrl+Q` | Quit |
+
+## macOS and iOS
+
+The Apple app is `apple/Omamd.xcodeproj`, bundle id `rocks.gurra.omamd`. Same overlay as Linux. Theme picks a bundled Omarchy palette or a `colors.toml` you choose. Follow is the pin.
+
+On **macOS**, drop a Markdown file on the window. Settings (⌘,) holds the theme, a window opacity slider, and Hide title bar.
+
+On **iOS**, open a `.md` from Files or **Open with** omamd. Palettes live in the app container.
+
+```
+make test-mac
+make test-ios
+```
+
+Those build the Mac app and the iPhone simulator app. The Mac CLI (`omamd --html` / `omamd --term`) is `make` without GTK.
 
 ## Terminal (SSH)
 
@@ -147,7 +168,7 @@ mkdir -p ~/.config/omamd
 cp examples/colors.toml ~/.config/omamd/colors.toml
 ```
 
-`make install` also puts a copy at `~/.local/share/omamd/colors.toml` as a template. The viewer reloads if you edit the active file while it is open.
+`make install` also puts a copy at `~/.local/share/omamd/colors.toml` as a template. The viewer reloads if you edit the active file while it is open. The overlay Theme button picks a bundled palette or a file; on Linux that pin is stored in `~/.config/omamd/ui.ini` so it does not fight `omarchy theme set`.
 
 One-shot, without installing a config file:
 
@@ -179,6 +200,7 @@ Written in C, commented for someone new to the language.
 13. `pkgbuild/` — Arch package, desktop entry, and icon
 14. `fonts/` — iA Writer Mono S (SIL Open Font License 1.1; see `fonts/OFL.txt`)
 15. `examples/colors.toml` — a paste-ready palette
-16. `examples/themes/` — Omarchy quattro `colors.toml` files plus Paper, for the Mac theme picker
+16. `examples/themes/` — Omarchy quattro `colors.toml` files plus Paper, for the theme picker
+17. `docs/iphone.png` — iPhone screenshot (PNG32, phone only)
 
 The preview and source views use the same iA Writer Mono that omawrite bundles. It is an OFL font: we may bundle and redistribute it with the app; we do not rename it.

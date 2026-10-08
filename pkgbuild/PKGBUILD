@@ -1,7 +1,7 @@
 # Maintainer: Gustav Alerby <g.alerby@gmail.com>
 
 pkgname=omamd
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Markdown viewer for files that come out of AI work'
 arch=('x86_64')
