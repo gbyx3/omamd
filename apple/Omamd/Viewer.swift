@@ -65,6 +65,10 @@ final class Viewer: ObservableObject {
         } else {
             followEnabled = UserDefaults.standard.bool(forKey: Self.followKey)
         }
+        /* HTML already reads the saved colors.toml on iOS; the overlay
+         * palette used to stay on the built-in default until a theme
+         * was picked again. Load it before the first paint. */
+        palette = Omamd.palette(themePath: resolvedThemePath)
         showWelcome()
         watchTheme()
     }
@@ -78,11 +82,14 @@ final class Viewer: ObservableObject {
     }
 
     var markdownTypes: [UTType] {
+        /* Drive and other Files providers often tag .md as public.data. */
         [
             UTType(filenameExtension: "md") ?? .plainText,
             UTType(filenameExtension: "markdown") ?? .plainText,
             UTType(filenameExtension: "mdown") ?? .plainText,
             .plainText,
+            .text,
+            .data,
         ]
     }
 
@@ -140,6 +147,10 @@ final class Viewer: ObservableObject {
         #else
         importer = .markdown
         #endif
+    }
+
+    func handleIncomingURL(_ url: URL) {
+        loadImported(url)
     }
 
     func loadImported(_ url: URL) {

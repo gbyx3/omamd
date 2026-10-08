@@ -60,7 +60,12 @@ struct ContentView: View {
             .padding(14)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(hex: viewer.palette.bg))
+        .background {
+            Color(hex: viewer.palette.bg)
+                #if os(iOS)
+                .ignoresSafeArea()
+                #endif
+        }
         .preferredColorScheme(viewer.palette.dark ? .dark : .light)
         #if os(macOS)
         .background(WindowChrome(

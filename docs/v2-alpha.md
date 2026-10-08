@@ -134,7 +134,7 @@ for the Mac app and the iOS simulator.
 |---|---|---|---|
 | Shell | GTK3 | SwiftUI | SwiftUI |
 | Preview | WebKitGTK | WKWebView | WKWebView |
-| Open file | path / drag-drop | NSOpenPanel | document picker |
+| Open file | path / drag-drop | NSOpenPanel | Files picker |
 | Palette | Omarchy live, then config | `~/.config/omamd/colors.toml` | bundled + import |
 | `--html` / `--term` | yes | yes (CLI) | no |
 | Window chrome | undecorated (Hyprland) | system titlebar | system chrome |

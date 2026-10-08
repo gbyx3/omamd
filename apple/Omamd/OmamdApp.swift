@@ -14,6 +14,7 @@ struct OmamdApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(viewer)
+                .onOpenURL(perform: viewer.handleIncomingURL)
         }
         .defaultSize(width: 820, height: 960)
         .commands {
@@ -53,6 +54,7 @@ struct OmamdApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(viewer)
+                .onOpenURL(perform: viewer.handleIncomingURL)
         }
         #endif
     }
