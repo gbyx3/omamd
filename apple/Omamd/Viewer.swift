@@ -22,6 +22,7 @@ final class Viewer: ObservableObject {
     @Published var themeID: String
     @Published var hideTitleBar: Bool
     @Published var followEnabled: Bool
+    @Published var windowOpacity: Double
     @Published var importer: Importer?
     @Published var loadError: String?
 
@@ -33,6 +34,8 @@ final class Viewer: ObservableObject {
     private static let themeIDKey = "omamd.themeID"
     private static let hideTitleBarKey = "omamd.hideTitleBar"
     private static let followKey = "omamd.follow"
+    private static let opacityKey = "omamd.windowOpacity"
+    static let opacityRange = 0.4...1.0
 
     let fontDir = BundledFonts.directory
     private(set) var docDir: URL?
@@ -64,6 +67,13 @@ final class Viewer: ObservableObject {
             followEnabled = true
         } else {
             followEnabled = UserDefaults.standard.bool(forKey: Self.followKey)
+        }
+        let storedOpacity = UserDefaults.standard.double(forKey: Self.opacityKey)
+        if UserDefaults.standard.object(forKey: Self.opacityKey) == nil {
+            windowOpacity = 1
+        } else {
+            windowOpacity = min(Self.opacityRange.upperBound,
+                                max(Self.opacityRange.lowerBound, storedOpacity))
         }
         /* HTML already reads the saved colors.toml on iOS; the overlay
          * palette used to stay on the built-in default until a theme
@@ -113,6 +123,13 @@ final class Viewer: ObservableObject {
 
     func toggleFollow() {
         setFollowEnabled(!followEnabled)
+    }
+
+    func setWindowOpacity(_ value: Double) {
+        let clamped = min(Self.opacityRange.upperBound,
+                          max(Self.opacityRange.lowerBound, value))
+        windowOpacity = clamped
+        UserDefaults.standard.set(clamped, forKey: Self.opacityKey)
     }
 
     func showWelcome() {

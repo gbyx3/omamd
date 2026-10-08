@@ -97,10 +97,11 @@ Open/reload (`NSOpenPanel` + dispatch source on mtime). Preview / source
 toggle (overlay button, `⌘1` / `⌘2`). Palette from
 `~/.config/omamd/colors.toml`. Navigation: http(s) → Safari; relative
 `.md` → load in-app. Normal Mac titlebar. Hyprland undecorated chrome
-stays in `linux/gtk.c`. Yabai tab-jump is held (#7). Mac Settings (`⌘,`) and View → Theme
-copy a bundled `examples/themes/*.toml` (Omarchy quattro + Paper) to
+stays in `linux/gtk.c`. Yabai tab-jump is held (#7). Mac Settings (`⌘,`) is a grouped pane: theme, window opacity,
+hide title bar, Follow. View → Theme still copies a bundled
+`examples/themes/*.toml` (Omarchy quattro + Paper) to
 `~/.config/omamd/colors.toml`. Hide title bar (Ghostty-style, traffic
-lights stay) is a Settings / View toggle, on by default.
+lights stay) is on by default.
 
 ### PR 6 — iOS target — started on this branch
 

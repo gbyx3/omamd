@@ -72,7 +72,8 @@ struct ContentView: View {
             title: viewer.windowTitle,
             hideTitleBar: viewer.hideTitleBar,
             backgroundHex: viewer.palette.bg,
-            dark: viewer.palette.dark
+            dark: viewer.palette.dark,
+            opacity: viewer.windowOpacity
         ))
         .frame(minWidth: 520, minHeight: 640)
         .ignoresSafeArea(.container, edges: viewer.hideTitleBar ? .top : [])

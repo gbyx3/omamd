@@ -5,25 +5,40 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Picker("Theme", selection: themeBinding) {
-                Text("Default").tag(ThemeCatalog.defaultID)
-                ForEach(ThemeCatalog.bundled) { theme in
-                    Text(theme.name).tag(theme.id)
+            Section("Theme") {
+                Picker("Palette", selection: themeBinding) {
+                    Text("Default").tag(ThemeCatalog.defaultID)
+                    ForEach(ThemeCatalog.bundled) { theme in
+                        Text(theme.name).tag(theme.id)
+                    }
+                    if viewer.themeID == ThemeCatalog.customID {
+                        Text("Custom").tag(ThemeCatalog.customID)
+                    }
                 }
-                if viewer.themeID == ThemeCatalog.customID {
-                    Text("Custom").tag(ThemeCatalog.customID)
+                Button("Choose File…") {
+                    viewer.chooseThemeFile()
                 }
-            }
-            Button("Choose File…") {
-                viewer.chooseThemeFile()
             }
             #if os(macOS)
-            Toggle("Hide title bar", isOn: hideTitleBarBinding)
+            Section("Window") {
+                HStack {
+                    Text("Opacity")
+                    Slider(value: opacityBinding, in: Viewer.opacityRange)
+                    Text("\(Int((viewer.windowOpacity * 100).rounded()))%")
+                        .monospacedDigit()
+                        .frame(width: 40, alignment: .trailing)
+                        .foregroundStyle(.secondary)
+                }
+                Toggle("Hide title bar", isOn: hideTitleBarBinding)
+            }
             #endif
+            Section("Reading") {
+                Toggle("Follow file changes", isOn: followBinding)
+            }
         }
         #if os(macOS)
-        .frame(minWidth: 360)
-        .padding()
+        .formStyle(.grouped)
+        .frame(minWidth: 420, minHeight: 320)
         #endif
     }
 
@@ -34,11 +49,25 @@ struct SettingsView: View {
         )
     }
 
+    private var followBinding: Binding<Bool> {
+        Binding(
+            get: { viewer.followEnabled },
+            set: { viewer.setFollowEnabled($0) }
+        )
+    }
+
     #if os(macOS)
     private var hideTitleBarBinding: Binding<Bool> {
         Binding(
             get: { viewer.hideTitleBar },
             set: { viewer.setHideTitleBar($0) }
+        )
+    }
+
+    private var opacityBinding: Binding<Double> {
+        Binding(
+            get: { viewer.windowOpacity },
+            set: { viewer.setWindowOpacity($0) }
         )
     }
     #endif

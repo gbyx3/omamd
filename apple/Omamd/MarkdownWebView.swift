@@ -307,6 +307,7 @@ struct WindowChrome: NSViewRepresentable {
     var hideTitleBar: Bool
     var backgroundHex: String
     var dark: Bool
+    var opacity: Double
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -321,6 +322,7 @@ struct WindowChrome: NSViewRepresentable {
         context.coordinator.hideTitleBar = hideTitleBar
         context.coordinator.background = Self.nsColor(hex: backgroundHex)
         context.coordinator.dark = dark
+        context.coordinator.opacity = opacity
         DispatchQueue.main.async {
             context.coordinator.attach(view.window)
         }
@@ -344,6 +346,7 @@ struct WindowChrome: NSViewRepresentable {
         var hideTitleBar = false
         var background = NSColor.black
         var dark = true
+        var opacity = 1.0
         private weak var window: NSWindow?
         private var observers: [NSObjectProtocol] = []
 
@@ -386,6 +389,8 @@ struct WindowChrome: NSViewRepresentable {
              * floats AXDialog, which is what you get without .titled. */
             window.styleMask.insert(.titled)
             window.tabbingMode = .disallowed
+            window.alphaValue = opacity
+            window.isOpaque = opacity >= 0.995
             if hideTitleBar {
                 window.titleVisibility = .hidden
                 window.titlebarAppearsTransparent = true
