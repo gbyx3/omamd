@@ -57,6 +57,14 @@ Omarchy. `examples/colors.toml` is the template.
 Window, WebKitGTK, GFileMonitor, drag-drop, Hyprland chrome, and
 fontconfig registration stay here.
 
+The preview/source toggle stays top-right. Open, Theme, and Follow sit
+in a bottom-right overlay cluster, matching the Apple chrome. Follow is
+a pin (on by default) and is stored in `~/.config/omamd/ui.ini`. Theme
+pops a menu: Omarchy (live), Default (built-in dark), bundled
+`examples/themes/*.toml`, and Choose File. A picked palette is a GTK
+pin so it wins over the Omarchy live file without changing `theme.c`
+lookup for `--html` / `--term`.
+
 `make test` uses the CLI binary (`--html` / `--term`) with plain `cc`.
 On Omarchy it also builds the GTK `omamd`.
 
@@ -135,8 +143,8 @@ for the Mac app and the iOS simulator.
 |---|---|---|---|
 | Shell | GTK3 | SwiftUI | SwiftUI |
 | Preview | WebKitGTK | WKWebView | WKWebView |
-| Open file | path / drag-drop | NSOpenPanel | Files picker |
-| Palette | Omarchy live, then config | `~/.config/omamd/colors.toml` | bundled + import |
+| Open file | path / drag-drop / overlay | NSOpenPanel | Files picker |
+| Palette | Omarchy live, then config; overlay can pin | `~/.config/omamd/colors.toml` | bundled + import |
 | `--html` / `--term` | yes | yes (CLI) | no |
 | Window chrome | undecorated (Hyprland) | system titlebar | system chrome |
 | Bundle id | — | `rocks.gurra.omamd` | `rocks.gurra.omamd` |

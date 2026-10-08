@@ -109,8 +109,8 @@ test-mac:
 test-ios:
 	xcodebuild -project apple/Omamd.xcodeproj -scheme Omamd -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0' build
 
-# Overlay chrome (#9 theme drop-up, #10 Follow glyph). Fails until those
-# issues are fixed; not part of `make test`.
+# Overlay chrome (#9 theme drop-up, #10 Follow glyph, Linux cluster).
+# Not part of `make test`.
 test-overlay:
 	sh tests/overlay-chrome.sh
 

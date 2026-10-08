@@ -1,5 +1,5 @@
 #!/bin/sh
-# Overlay chrome contracts for GitHub #9 and #10.
+# Overlay chrome contracts for GitHub #9 and #10, plus Linux GTK cluster.
 # Not part of `make test` (Linux stays gcc-only). Run: make test-overlay
 set -e
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
@@ -13,6 +13,7 @@ VIEWER=apple/Omamd/Viewer.swift
 CONTENT=apple/Omamd/ContentView.swift
 APP=apple/Omamd/OmamdApp.swift
 CHROME=apple/Omamd/MarkdownWebView.swift
+GTK=linux/gtk.c
 
 # --- #9 Mac theme drop-up menu ---
 if grep -q 'showSettingsWindow' "$VIEWER"; then
@@ -44,6 +45,31 @@ if grep -q 'allowsAutomaticWindowTabbing = false' "$APP" \
 	ok '#7 native window tabbing disabled'
 else
 	bad '#7 window tabbing still allowed (yabai retile on tab switch)'
+fi
+
+# --- Linux overlay cluster (Open / Theme / Follow) ---
+if grep -q 'omamd-overlay-cluster' "$GTK" \
+	&& grep -q 'open_btn' "$GTK" \
+	&& grep -q 'theme_btn' "$GTK" \
+	&& grep -q 'follow_btn' "$GTK"; then
+	ok 'linux overlay cluster Open/Theme/Follow'
+else
+	bad 'linux overlay missing bottom-right Open/Theme/Follow cluster'
+fi
+if grep -q 'follow_enabled' "$GTK" && grep -q 'on_follow_clicked' "$GTK"; then
+	ok 'linux Follow is a pin toggle'
+else
+	bad 'linux Follow toggle missing'
+fi
+if grep -q 'on_theme_clicked' "$GTK" && grep -q 'Choose File' "$GTK"; then
+	ok 'linux Theme menu'
+else
+	bad 'linux Theme overlay menu missing'
+fi
+if grep -q 'arrow.down.to.line' "$GTK"; then
+	bad 'linux Follow still uses a download glyph'
+else
+	ok 'linux Follow icon is not download'
 fi
 
 if [ "$fail" -ne 0 ]; then
