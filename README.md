@@ -1,6 +1,12 @@
 # Omamd
 
-A Markdown renderer for the agentic era. Point it at `.md` files agents write — chat exports, generated docs, READMEs, notes — and it follows your Omarchy theme, reloads as the file grows, renders in the terminal over SSH, and converts to HTML when you need a page.
+A Markdown renderer for the agentic era. Point it at `.md` files agents write — chat exports, generated docs, READMEs, notes — and it follows your palette, reloads as the file grows, renders in the terminal over SSH, and converts to HTML when you need a page.
+
+Linux (GTK), macOS, and iOS share one C core. The floating overlay is the same on every shell: preview/source top-right, Open / Theme / Follow bottom-right.
+
+<p align="center">
+  <img src="docs/iphone.png" alt="omamd on iPhone" width="280">
+</p>
 
 **Repo:** https://github.com/gbyx3/omamd
 
@@ -19,7 +25,7 @@ SSH if the environment already uses it: `git@github.com:gbyx3/omamd.git`
 
 ### 2. Dependencies
 
-Need `gcc`, `make`, `pkgconf`, `gtk3`, and `webkit2gtk-4.1`.
+Need `gcc` and `make`. The GTK window also needs `pkgconf`, `gtk3`, and `webkit2gtk-4.1`. `--html` and `--term` build without those.
 
 On **Omarchy** they are already installed. If a check fails:
 
@@ -39,7 +45,7 @@ sudo pacman -S --needed gcc make pkgconf gtk3 webkit2gtk-4.1
 ./bin/build
 ```
 
-Expect `Built …/omamd/build/omamd`. Run `./bin/test` if you want the parser smoke check.
+Expect `Built …/omamd/build/omamd`. Run `./bin/test` if you want the `--html` / `--term` smoke check (no GTK needed).
 
 ### 4. User-local install (no sudo)
 
@@ -85,9 +91,9 @@ Later updates: `git pull && ./bin/build && make install` from the clone.
 omamd notes.md
 ```
 
-Bare window, no title bar. The round button in the top-right switches Preview and Source and stays put while you scroll. If the file changes on disk — an agent appending to it, or a save from another editor — omamd reloads and eases down to the new bottom. Drop a `.md` on the window to open it. Relative links to other Markdown files in the same folder open in omamd; `http`/`https` links go to the browser.
+Bare window, no title bar. The round button in the top-right switches Preview and Source and stays put while you scroll. Open, Theme, and Follow sit in the bottom-right corner. Follow is a pin: when it is on, a file change eases down to the new bottom. Drop a `.md` on the window to open it. Relative links to other Markdown files in the same folder open in omamd; `http`/`https` links go to the browser.
 
-The preview uses the current Omarchy palette (`~/.local/state/omarchy/current/theme/colors.toml`) and updates when you `omarchy theme set`.
+The preview uses the active palette (see [Palette](#palette)) and reloads when that file changes.
 
 | Key | Action |
 |-----|--------|
@@ -96,6 +102,21 @@ The preview uses the current Omarchy palette (`~/.local/state/omarchy/current/th
 | `Ctrl+1` / `Ctrl+2` | Preview / Source |
 | `Ctrl+Q` | Quit |
 
+## macOS and iOS
+
+The Apple app is `apple/Omamd.xcodeproj`, bundle id `rocks.gurra.omamd`. Same overlay as Linux. Theme picks a bundled Omarchy palette or a `colors.toml` you choose. Follow is the pin.
+
+On **macOS**, drop a Markdown file on the window. Settings (⌘,) holds the theme, a window opacity slider, and Hide title bar.
+
+On **iOS**, open a `.md` from Files or **Open with** omamd. Palettes live in the app container.
+
+```
+make test-mac
+make test-ios
+```
+
+Those build the Mac app and the iPhone simulator app. The Mac CLI (`omamd --html` / `omamd --term`) is `make` without GTK.
+
 ## Terminal (SSH)
 
 ```
@@ -103,7 +124,7 @@ omamd --term notes.md
 omamd -t notes.md
 ```
 
-No GTK window. Markdown is rendered as colour text in the terminal, using the same Omarchy palette as the viewer. Over SSH — no `WAYLAND_DISPLAY` or `DISPLAY` — `omamd notes.md` does this by itself.
+No GTK window. Markdown is rendered as colour text in the terminal, using the same palette as the viewer. Over SSH — no `WAYLAND_DISPLAY` or `DISPLAY` — `omamd notes.md` does this by itself.
 
 A TTY opens a pager. If the file is being written — an agent appending to it — omamd reloads. Follow starts **on**: the view jumps to the new bottom. `f` pins the view where you are; `f` again jumps to the end and keeps chasing it.
 
@@ -124,9 +145,37 @@ omamd --html notes.md > notes.html
 omamd --html < notes.md > notes.html
 ```
 
-Turns Markdown into a full HTML document (styled with the current Omarchy colours) on stdout. No window. Useful when a pipeline already has `.md` and you want a page you can archive or attach.
+Turns Markdown into a full HTML document (styled with the active palette) on stdout. No window. Useful when a pipeline already has `.md` and you want a page you can archive or attach.
 
 Unsafe URL schemes (`javascript:`, `file:`, `data:text/html`, rooted `/etc/...` paths) are stripped so the HTML is fit to open in a browser.
+
+## Palette
+
+The file format is Omarchy's `colors.toml`. omamd reads `background`, `foreground`, `muted` (or `dark_foreground`), `accent` (or `blue`), `dark_background` (or `darker_background`), `lighter_background`, `selection`, and `mode`. Extra keys are ignored.
+
+Lookup order:
+
+1. `omamd --theme PATH` — a file, or a directory that contains `colors.toml`
+2. `$OMAMD_THEME` — the same
+3. Omarchy live theme — `~/.local/state/omarchy/current/theme/colors.toml` (follows `omarchy theme set`)
+4. A file you paste — `$XDG_CONFIG_HOME/omamd/colors.toml`, or `~/.config/omamd/colors.toml`
+5. Built-in dark palette
+
+To supply a palette by hand, copy a theme from a machine that has one, or start from the example:
+
+```
+mkdir -p ~/.config/omamd
+cp examples/colors.toml ~/.config/omamd/colors.toml
+```
+
+`make install` also puts a copy at `~/.local/share/omamd/colors.toml` as a template. The viewer reloads if you edit the active file while it is open. The overlay Theme button picks a bundled palette or a file; on Linux that pin is stored in `~/.config/omamd/ui.ini` so it does not fight `omarchy theme set`.
+
+One-shot, without installing a config file:
+
+```
+omamd --theme examples/colors.toml notes.md
+OMAMD_THEME=~/.config/omamd/colors.toml omamd --html notes.md
+```
 
 ## Markdown it understands
 
@@ -136,13 +185,22 @@ Headings, **bold**, *italic*, ~~strike~~, `code`, fenced and indented blocks, li
 
 Written in C, commented for someone new to the language.
 
-1. `src/markdown.h` — the converter’s public function
-2. `src/markdown.c` — Markdown → HTML
-3. `src/main.c` — window, file loading, Omarchy colours
-4. `src/term.h` / `src/term.c` — ANSI render and the SSH pager
-5. `Makefile` — how `gcc` is invoked
-6. `bin/` — `build`, `test`, `install`
-7. `pkgbuild/` — Arch package, desktop entry, and icon
-8. `fonts/` — iA Writer Mono S (SIL Open Font License 1.1; see `fonts/OFL.txt`)
+1. `core/omamd.h` — the C ABI (`markdown_to_html`, palette, `omamd_document`)
+2. `core/markdown.h` / `core/markdown.c` — Markdown → HTML
+3. `core/theme.h` / `core/theme.c` — `colors.toml` lookup and palette
+4. `core/html.h` / `core/html.c` — palette + fragment → full HTML page
+5. `core/util.h` / `core/util.c` — file and path helpers
+6. `core/fonts.h` / `core/fonts.c` — bundled iA Writer Mono S search
+7. `core/term.h` / `core/term.c` — ANSI render and the SSH pager
+8. `cli/cli.h` / `cli/cli.c` / `cli/main.c` — `--html`, `--term`, argv
+9. `linux/gtk.c` — GTK window
+10. `apple/` — macOS SwiftUI + WKWebView app (`rocks.gurra.omamd`)
+11. `Makefile` — how `gcc` is invoked
+12. `bin/` — `build`, `test`, `install`
+13. `pkgbuild/` — Arch package, desktop entry, and icon
+14. `fonts/` — iA Writer Mono S (SIL Open Font License 1.1; see `fonts/OFL.txt`)
+15. `examples/colors.toml` — a paste-ready palette
+16. `examples/themes/` — Omarchy quattro `colors.toml` files plus Paper, for the theme picker
+17. `docs/iphone.png` — iPhone screenshot (PNG32, phone only)
 
 The preview and source views use the same iA Writer Mono that omawrite bundles. It is an OFL font: we may bundle and redistribute it with the app; we do not rename it.

@@ -5,46 +5,114 @@
 #
 # pkg-config asks the system "what compiler flags does GTK need?"
 # so we do not hard-code include paths that change between machines.
+# The CLI (--html / --term) compiles without those libraries.
 
 CC      ?= gcc
 PKGS    := gtk+-3.0 webkit2gtk-4.1 fontconfig
 CFLAGS  ?= -std=c11 -Wall -Wextra -g -O2
-CFLAGS  += $(shell pkg-config --cflags $(PKGS))
+CLI_CFLAGS ?= -std=c11 -Wall -Wextra -g -O2
 LDFLAGS ?=
+HAVE_GTK := $(shell pkg-config --exists gtk+-3.0 webkit2gtk-4.1 fontconfig 2>/dev/null && echo yes)
+ifeq ($(HAVE_GTK),yes)
+CFLAGS  += $(shell pkg-config --cflags $(PKGS))
 LDLIBS  := $(shell pkg-config --libs $(PKGS))
+else
+LDLIBS  :=
+endif
 
-SRC      := src/main.c src/markdown.c src/term.c
 BUILDDIR := build
+INCLUDES := -I core -I cli
+CORE     := core/util.c core/fonts.c core/markdown.c core/theme.c core/html.c core/term.c
+CLI_SRC  := cli/cli.c
+COMMON   := $(CLI_SRC) $(CORE)
+HDRS     := core/omamd.h core/util.h core/fonts.h core/markdown.h core/theme.h core/html.h core/term.h cli/cli.h
+
+ifeq ($(HAVE_GTK),yes)
 BIN      := $(BUILDDIR)/omamd
+CLI_BIN  := $(BUILDDIR)/omamd-cli
+else
+BIN      := $(BUILDDIR)/omamd
+CLI_BIN  := $(BUILDDIR)/omamd
+endif
 
 PREFIX ?= $(HOME)/.local
 
-.PHONY: all clean test install
+.PHONY: all clean test test-cli test-gtk test-mac test-ios test-overlay install
 
 all: $(BIN)
+ifeq ($(HAVE_GTK),yes)
+all: $(CLI_BIN)
+endif
 
-$(BIN): $(SRC) src/markdown.h src/term.h
+$(CLI_BIN): cli/main.c $(COMMON) $(HDRS)
 	mkdir -p $(BUILDDIR)
-	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CLI_CFLAGS) $(INCLUDES) -o $@ cli/main.c $(COMMON)
+
+ifeq ($(HAVE_GTK),yes)
+$(BIN): linux/gtk.c $(COMMON) $(HDRS)
+	mkdir -p $(BUILDDIR)
+	$(CC) $(CFLAGS) $(INCLUDES) -o $@ linux/gtk.c $(COMMON) $(LDFLAGS) $(LDLIBS)
+endif
 
 clean:
 	rm -rf $(BUILDDIR)
 
-# Smoke-test the parser without opening a window.
-test: $(BIN)
+# --html and --term, no GTK.  This is `make test` on a Mac.
+# Empty HOME so a developer colors.toml cannot shadow the default palette.
+TEST_HOME := $(BUILDDIR)/test-home
+TEST_ENV  := HOME=$(TEST_HOME) XDG_CONFIG_HOME=$(TEST_HOME)/.config
+test-cli: $(CLI_BIN)
+	mkdir -p $(TEST_HOME)
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '<h1>'
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '<code>'
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '<table>'
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '<input type="checkbox"'
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q 'grid-column: 2'
+	$(TEST_ENV) $(CLI_BIN) --html examples/security.md | grep -q 'href="https://example.com/ok"'
+	$(TEST_ENV) $(CLI_BIN) --html examples/security.md | grep -q 'src="https://example.com/pix.png"'
+	! $(TEST_ENV) $(CLI_BIN) --html examples/security.md | grep -q 'javascript:'
+	! $(TEST_ENV) $(CLI_BIN) --html examples/security.md | grep -q 'file:///etc/passwd'
+	! $(TEST_ENV) $(CLI_BIN) --html examples/security.md | grep -q 'data:text/html'
+	! $(TEST_ENV) $(CLI_BIN) --html examples/security.md | grep -q 'src="/etc/passwd"'
+	$(TEST_ENV) $(CLI_BIN) --term examples/welcome.md | grep -q 'Welcome'
+	! $(TEST_ENV) $(CLI_BIN) --term examples/welcome.md | grep -q '<h1>'
+	$(TEST_ENV) $(CLI_BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#fff8ee'
+	$(TEST_ENV) $(CLI_BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#c81e1e'
+	! $(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '#fff8ee'
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '#1e1e2e'
+	$(TEST_ENV) $(CLI_BIN) --theme /no/such/omamd-theme.toml --html examples/welcome.md | grep -q '<h1>'
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q '@font-face'
+	$(TEST_ENV) $(CLI_BIN) --html examples/welcome.md | grep -q 'file://'
+	$(TEST_ENV) $(CLI_BIN) --version | grep -q 'omamd'
+	@for f in examples/themes/*.toml; do \
+		grep -q '^background =' $$f && grep -q '^foreground =' $$f || exit 1; \
+		$(TEST_ENV) $(CLI_BIN) --theme $$f --html examples/welcome.md | grep -q '<h1>' || exit 1; \
+	done
+	@echo "ok (cli)"
+
+# GTK binary still dispatches --html / --term through cli.c.
+test-gtk: $(BIN)
 	$(BIN) --html examples/welcome.md | grep -q '<h1>'
-	$(BIN) --html examples/welcome.md | grep -q '<code>'
-	$(BIN) --html examples/welcome.md | grep -q '<table>'
-	$(BIN) --html examples/welcome.md | grep -q '<input type="checkbox"'
-	$(BIN) --html examples/security.md | grep -q 'href="https://example.com/ok"'
-	$(BIN) --html examples/security.md | grep -q 'src="https://example.com/pix.png"'
-	! $(BIN) --html examples/security.md | grep -q 'javascript:'
-	! $(BIN) --html examples/security.md | grep -q 'file:///etc/passwd'
-	! $(BIN) --html examples/security.md | grep -q 'data:text/html'
-	! $(BIN) --html examples/security.md | grep -q 'src="/etc/passwd"'
 	$(BIN) --term examples/welcome.md | grep -q 'Welcome'
-	! $(BIN) --term examples/welcome.md | grep -q '<h1>'
-	@echo "ok"
+	$(BIN) --theme examples/colors.toml --html examples/welcome.md | grep -q '#fff8ee'
+	@echo "ok (gtk)"
+
+test: test-cli
+ifeq ($(HAVE_GTK),yes)
+test: test-gtk
+endif
+
+# Mac .app.  Not part of `make test` so Linux stays gcc-only.
+test-mac:
+	xcodebuild -project apple/Omamd.xcodeproj -scheme Omamd -configuration Debug -destination 'platform=macOS' build
+
+test-ios:
+	xcodebuild -project apple/Omamd.xcodeproj -scheme Omamd -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0' build
+
+# Overlay chrome (#9 theme drop-up, #10 Follow glyph, Linux cluster).
+# Not part of `make test`.
+test-overlay:
+	sh tests/overlay-chrome.sh
 
 install: $(BIN) pkgbuild/omamd.desktop pkgbuild/omamd.svg
 	install -Dm755 $(BIN) $(DESTDIR)$(PREFIX)/bin/omamd
@@ -55,5 +123,8 @@ install: $(BIN) pkgbuild/omamd.desktop pkgbuild/omamd.svg
 	install -Dm644 fonts/iAWriterMonoS-Italic.ttf $(DESTDIR)$(PREFIX)/share/omamd/fonts/iAWriterMonoS-Italic.ttf
 	install -Dm644 fonts/iAWriterMonoS-Bold.ttf $(DESTDIR)$(PREFIX)/share/omamd/fonts/iAWriterMonoS-Bold.ttf
 	install -Dm644 fonts/iAWriterMonoS-BoldItalic.ttf $(DESTDIR)$(PREFIX)/share/omamd/fonts/iAWriterMonoS-BoldItalic.ttf
+	install -Dm644 examples/colors.toml $(DESTDIR)$(PREFIX)/share/omamd/colors.toml
+	install -d $(DESTDIR)$(PREFIX)/share/omamd/themes
+	install -m644 examples/themes/*.toml $(DESTDIR)$(PREFIX)/share/omamd/themes
 	-update-desktop-database $(DESTDIR)$(PREFIX)/share/applications
 	-gtk-update-icon-cache -q -t -f $(DESTDIR)$(PREFIX)/share/icons/hicolor

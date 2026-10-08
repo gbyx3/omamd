@@ -6,7 +6,7 @@ This file is a tour of what the viewer can render. Open it with:
 omamd examples/welcome.md
 ```
 
-The round button in the top-right corner (or `Ctrl+1` / `Ctrl+2`) switches between the rendered page and the Markdown source. It stays put when you scroll.
+The round button in the top-right corner (or `Ctrl+1` / `Ctrl+2`) switches between the rendered page and the Markdown source. Open, Theme, and Follow sit in the bottom-right corner. They stay put when you scroll.
 
 ## Emphasis
 

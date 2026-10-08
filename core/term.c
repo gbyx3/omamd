@@ -6,6 +6,8 @@
  * A TTY gets a tiny pager; a pipe just gets the text.
  */
 
+#define _POSIX_C_SOURCE 200809L
+
 #include "term.h"
 #include "markdown.h"
 
@@ -18,6 +20,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <termios.h>
 #include <unistd.h>
 

@@ -1,7 +1,7 @@
 #define _DEFAULT_SOURCE
 
 /*
- * main.c — the window, the buttons, and the file loading.
+ * linux/gtk.c — the window, the buttons, and the file loading.
  *
  * Read markdown.c first.  That file is the language lesson.
  * This file is the "how a graphical C program is wired" lesson.
@@ -9,15 +9,15 @@
  * GTK (the GIMP Toolkit) is a C library.  Every on-screen thing is
  * a *widget*: a window, a button, a text view, a WebKit page.  You
  * create widgets, put them inside other widgets (a stack of pages
- * inside an overlay, a pair of buttons on top of that overlay),
- * and connect *signals* (events like "clicked" or "destroy") to
- * functions you write.
+ * inside an overlay, a mode toggle and a bottom-right cluster on
+ * that overlay), and connect *signals* (events like "clicked" or
+ * "destroy") to functions you write.
  *
  * The life of this program:
  *
- *   1. Look at the command-line arguments.
- *   2. If the user asked for --html, convert and print, then exit.
- *      No window.  This is how we test the parser from a terminal.
+ *   1. Look at the command-line arguments (cli/cli.c).
+ *   2. If the user asked for --html or --term, handle that and exit.
+ *      Those paths also live in the GTK-free binary (cli/main.c).
  *   3. Otherwise gtk_init() talks to the Wayland/X11 display.
  *   4. Build the window, connect signals, load a file if one was given.
  *   5. gtk_main() sits in a loop: wait for an event, handle it, repeat
@@ -31,27 +31,23 @@
  *   and structs.  GTK is the C toolkit that already looks like Omarchy.
  */
 
+#include "cli.h"
+#include "fonts.h"
+#include "html.h"
 #include "markdown.h"
-#include "term.h"
+#include "theme.h"
+#include "util.h"
 
-#include <ctype.h>
 #include <fontconfig/fontconfig.h>
 #include <gtk/gtk.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <webkit2/webkit2.h>
 
-/* A #define is a name the preprocessor pastes in before compiling.
- * OMAMD_VERSION is not a variable; it is literally the characters "0.1". */
-#define OMAMD_VERSION "0.1"
-
-/* Refuse to slurp a multi-gigabyte "markdown" file into RAM. */
-#define OMAMD_MAX_FILE_BYTES (32u * 1024u * 1024u)
-
-/* Directory that holds the bundled iA Writer Mono S files, or "". */
-static char g_font_dir[4200];
+/* --theme PATH from the command line, or NULL.  theme.c also reads
+ * OMAMD_THEME, the Omarchy live file, and ~/.config/omamd/colors.toml. */
+static const char *g_theme_arg = NULL;
 
 /* ---------------------------------------------------------------
  * The App struct: all the program's live state in one bundle.
@@ -67,13 +63,23 @@ typedef struct {
     GtkWidget *text_view;
     GtkWidget *stack;
     GtkWidget *mode_btn;
-    char icon_fg[16];      /* hex colour for the floating toggle icon */
+    GtkWidget *open_btn;
+    GtkWidget *theme_btn;
+    GtkWidget *follow_btn;
+    GtkWidget *theme_menu;
+    char icon_fg[16];      /* hex colour for the floating overlay icons */
+    char icon_muted[16];
+    int follow_enabled;    /* pin: jump to the end on a live file change */
+    char theme_id[128];    /* omarchy / default / custom / bundled stem */
+    char *pin_path;        /* malloc'd colors.toml that wins over Omarchy */
+    int pin_builtin;       /* 1: skip files, use the built-in dark palette */
+    int theme_menu_building;
 
     char *path;            /* malloc'd path of the open file, or NULL */
     char *doc_dir;         /* realpath of that file's directory, or NULL */
     char *base_uri;        /* file:// URI of that file's directory */
     char *source;          /* malloc'd Markdown text currently shown */
-    char *css;             /* malloc'd stylesheet, from Omarchy if possible */
+    char *css;             /* malloc'd stylesheet, from the active palette */
     GtkCssProvider *ui_css; /* GTK chrome stylesheet; we reload this in place */
 
     GFileMonitor *monitor; /* watches the open Markdown file */
@@ -87,165 +93,15 @@ typedef struct {
     gdouble scroll_to;
     gint64 scroll_t0;
 
-    GFileMonitor *theme_dir_mon;    /* ~/.local/state/omarchy/current/ */
-    GFileMonitor *theme_colors_mon; /* .../theme/colors.toml */
+    GFileMonitor *theme_dir_mon;    /* Omarchy current/ or ~/.config/omamd */
+    GFileMonitor *theme_colors_mon; /* the colors.toml we loaded */
     guint theme_timeout;
 } App;
 
-/* ---------------------------------------------------------------
- * Tiny helpers: files and strings
- * ---------------------------------------------------------------
- *
- * fopen / fread / fclose is the classic C way to read a file.
- * GTK also has g_file_get_contents(); we use the C version here
- * so you can see the pattern, then free() the result.
- */
-
-static char *read_entire_file(const char *path, size_t *out_len)
-{
-    FILE *f;
-    long size;
-    char *buf;
-    size_t got;
-
-    /* "rb" = read, binary.  Binary so Windows \r\n is not rewritten;
-     * the parser already understands both kinds of line ending. */
-    f = fopen(path, "rb");
-    if (!f)
-        return NULL;
-
-    /* SEEK_END + ftell() asks "how many bytes is this file?"
-     * It is fine for normal files; it is not how you read a pipe. */
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return NULL;
-    }
-    size = ftell(f);
-    if (size < 0 || (unsigned long)size > OMAMD_MAX_FILE_BYTES) {
-        fclose(f);
-        return NULL;
-    }
-    rewind(f); /* same as fseek(f, 0, SEEK_SET): go back to byte 0 */
-
-    buf = malloc((size_t)size + 1);
-    if (!buf) {
-        fclose(f);
-        return NULL;
-    }
-    got = fread(buf, 1, (size_t)size, f);
-    fclose(f);
-    buf[got] = '\0';
-    if (out_len)
-        *out_len = got;
-    return buf;
-}
-
-/* Read stdin until EOF.  Used by `omamd --html < notes.md`. */
-static char *read_entire_stdin(size_t *out_len)
-{
-    char *buf = NULL;
-    size_t len = 0;
-    size_t cap = 0;
-    char tmp[4096];
-    size_t n;
-
-    while ((n = fread(tmp, 1, sizeof(tmp), stdin)) > 0) {
-        if (n > OMAMD_MAX_FILE_BYTES || len > OMAMD_MAX_FILE_BYTES - n) {
-            free(buf);
-            return NULL;
-        }
-        if (len + n + 1 > cap) {
-            size_t new_cap = cap ? cap * 2 : 8192;
-            char *grown;
-            while (new_cap < len + n + 1)
-                new_cap *= 2;
-            grown = realloc(buf, new_cap);
-            if (!grown) {
-                free(buf);
-                return NULL;
-            }
-            buf = grown;
-            cap = new_cap;
-        }
-        memcpy(buf + len, tmp, n);
-        len += n;
-    }
-    if (!buf) {
-        buf = malloc(1);
-        if (!buf)
-            return NULL;
-    }
-    buf[len] = '\0';
-    if (out_len)
-        *out_len = len;
-    return buf;
-}
-
-static char *dup_str(const char *s)
-{
-    size_t n;
-    char *out;
-    if (!s)
-        return NULL;
-    n = strlen(s);
-    out = malloc(n + 1);
-    if (!out)
-        return NULL;
-    memcpy(out, s, n + 1);
-    return out;
-}
-
-static char *dir_of(const char *path)
-{
-    const char *slash = strrchr(path, '/');
-    char *dir;
-    size_t n;
-
-    if (!slash)
-        return dup_str(".");
-    if (slash == path)
-        return dup_str("/");
-    n = (size_t)(slash - path);
-    dir = malloc(n + 1);
-    if (!dir)
-        return NULL;
-    memcpy(dir, path, n);
-    dir[n] = '\0';
-    return dir;
-}
-
-/*
- * iA Writer Mono S is bundled under the SIL Open Font License 1.1
- * (see fonts/OFL.txt).  We register the files with fontconfig so GTK
- * and WebKit can see the family without a system install, then look
- * next to the binary, in ~/.local/share/omamd/fonts, and in
- * /usr/share/omamd/fonts.
- */
-static int font_dir_ok(const char *dir)
-{
-    char path[4200];
-    if (!dir || !dir[0])
-        return 0;
-    snprintf(path, sizeof(path), "%s/iAWriterMonoS-Regular.ttf", dir);
-    return g_file_test(path, G_FILE_TEST_IS_REGULAR);
-}
-
-static int adopt_font_dir(const char *dir)
-{
-    char *real;
-    if (!font_dir_ok(dir))
-        return 0;
-    real = realpath(dir, NULL);
-    if (real) {
-        snprintf(g_font_dir, sizeof(g_font_dir), "%s", real);
-        free(real);
-    } else {
-        snprintf(g_font_dir, sizeof(g_font_dir), "%s", dir);
-    }
-    return 1;
-}
-
-static void load_app_fonts(void)
+/* Register the bundled faces with fontconfig so GtkTextView can
+ * use "iA Writer Mono S" by family name.  The HTML preview loads
+ * the same files via @font-face in omamd_document(). */
+static void register_app_fonts(void)
 {
     static const char *files[] = {
         "iAWriterMonoS-Regular.ttf",
@@ -253,353 +109,25 @@ static void load_app_fonts(void)
         "iAWriterMonoS-Bold.ttf",
         "iAWriterMonoS-BoldItalic.ttf",
     };
-    const char *env = getenv("OMAMD_FONTDIR");
-    const char *home = getenv("HOME");
-    char buf[4200];
-    char exe[4096];
-    ssize_t n;
+    const char *dir = omamd_font_dir();
+    char buf[4400];
     size_t i;
 
-    g_font_dir[0] = '\0';
-    if (env && adopt_font_dir(env))
-        goto add;
-
-    n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-    if (n > 0) {
-        char *slash;
-        exe[n] = '\0';
-        slash = strrchr(exe, '/');
-        if (slash) {
-            *slash = '\0';
-            snprintf(buf, sizeof(buf), "%s/../fonts", exe);
-            if (adopt_font_dir(buf))
-                goto add;
-            snprintf(buf, sizeof(buf), "%s/fonts", exe);
-            if (adopt_font_dir(buf))
-                goto add;
-        }
-    }
-
-    if (home) {
-        snprintf(buf, sizeof(buf), "%s/.local/share/omamd/fonts", home);
-        if (adopt_font_dir(buf))
-            goto add;
-    }
-    if (adopt_font_dir("/usr/share/omamd/fonts"))
-        goto add;
-    if (adopt_font_dir("fonts"))
-        goto add;
-    return;
-
-add:
+    if (!dir[0])
+        return;
     for (i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
-        snprintf(buf, sizeof(buf), "%s/%s", g_font_dir, files[i]);
+        snprintf(buf, sizeof(buf), "%s/%s", dir, files[i]);
         FcConfigAppFontAddFile(NULL, (const FcChar8 *)buf);
     }
 }
 
-static void append_bundled_fonts(GString *s)
-{
-    static const struct {
-        const char *file;
-        const char *style;
-        const char *weight;
-    } faces[] = {
-        { "iAWriterMonoS-Regular.ttf", "normal", "400" },
-        { "iAWriterMonoS-Italic.ttf", "italic", "400" },
-        { "iAWriterMonoS-Bold.ttf", "normal", "700" },
-        { "iAWriterMonoS-BoldItalic.ttf", "italic", "700" },
-    };
-    size_t i;
-
-    if (!g_font_dir[0])
-        return;
-    for (i = 0; i < sizeof(faces) / sizeof(faces[0]); i++) {
-        char path[4400];
-        char *uri;
-        snprintf(path, sizeof(path), "%s/%s", g_font_dir, faces[i].file);
-        uri = g_filename_to_uri(path, NULL, NULL);
-        if (!uri)
-            continue;
-        g_string_append(s, "@font-face{font-family:\"iA Writer Mono S\";font-style:");
-        g_string_append(s, faces[i].style);
-        g_string_append(s, ";font-weight:");
-        g_string_append(s, faces[i].weight);
-        g_string_append(s, ";src:url('");
-        g_string_append(s, uri);
-        g_string_append(s, "') format('truetype');font-display:swap;}");
-        g_free(uri);
-    }
-}
-
-static int ends_with_ci(const char *s, const char *suffix)
-{
-    size_t ns = strlen(s);
-    size_t nt = strlen(suffix);
-    size_t i;
-    if (nt > ns)
-        return 0;
-    for (i = 0; i < nt; i++) {
-        unsigned char a = (unsigned char)s[ns - nt + i];
-        unsigned char b = (unsigned char)suffix[i];
-        if (tolower(a) != tolower(b))
-            return 0;
-    }
-    return 1;
-}
-
-static int is_markdown_path(const char *path)
-{
-    return ends_with_ci(path, ".md") ||
-           ends_with_ci(path, ".markdown") ||
-           ends_with_ci(path, ".mdown") ||
-           ends_with_ci(path, ".txt");
-}
-
-/* ---------------------------------------------------------------
- * Omarchy theme → CSS
- *
- * Each Omarchy theme ships a colors.toml.  The one that is actually
- * in use is copied to:
- *
- *   ~/.local/state/omarchy/current/theme/colors.toml
- *
- * We read a handful of keys and turn them into CSS variables so the
- * preview follows Super+Ctrl+Shift+Space (or `omarchy theme set`)
- * the next time you open a file.  If that file is missing, we fall
- * back to a dark palette that still looks like a document.
- * --------------------------------------------------------------- */
-
-typedef struct {
-    char bg[16];
-    char fg[16];
-    char muted[16];
-    char accent[16];
-    char code_bg[16];
-    char surface[16];
-    char sel[16];
-    int dark;
-} Palette;
-
-static int valid_hex_color(const char *s)
-{
-    size_t n;
-    size_t i;
-    if (!s || s[0] != '#')
-        return 0;
-    n = strlen(s);
-    if (n != 4 && n != 7)
-        return 0;
-    for (i = 1; i < n; i++) {
-        if (!isxdigit((unsigned char)s[i]))
-            return 0;
-    }
-    return 1;
-}
-
-static void set_color(char *dst, size_t dst_sz, const char *src)
-{
-    size_t i;
-    for (i = 0; i + 1 < dst_sz && src[i] != '\0'; i++)
-        dst[i] = src[i];
-    dst[i] = '\0';
-}
-
-/* Pull `key = "value"` out of a tiny TOML subset.  Real TOML is more
- * than this; theme files only need this shape. */
-static int toml_get(const char *text, const char *key, char *out, size_t out_sz)
-{
-    const char *p = text;
-    size_t klen = strlen(key);
-
-    while (*p != '\0') {
-        int at_bol = (p == text || p[-1] == '\n');
-        if (at_bol && strncmp(p, key, klen) == 0) {
-            const char *q = p + klen;
-            const char *end;
-            size_t n;
-            while (*q == ' ' || *q == '\t')
-                q++;
-            if (*q != '=') {
-                p++;
-                continue;
-            }
-            q++;
-            while (*q == ' ' || *q == '\t')
-                q++;
-            if (*q != '"') {
-                p++;
-                continue;
-            }
-            q++;
-            end = q;
-            while (*end != '\0' && *end != '"' && *end != '\n')
-                end++;
-            n = (size_t)(end - q);
-            if (n >= out_sz)
-                n = out_sz - 1;
-            memcpy(out, q, n);
-            out[n] = '\0';
-            return 1;
-        }
-        p++;
-    }
-    return 0;
-}
-
-static void palette_default(Palette *p)
-{
-    /* A warm-dark fallback if Omarchy's file is not there. */
-    snprintf(p->bg, sizeof(p->bg), "%s", "#1e1e2e");
-    snprintf(p->fg, sizeof(p->fg), "%s", "#cdd6f4");
-    snprintf(p->muted, sizeof(p->muted), "%s", "#6c7086");
-    snprintf(p->accent, sizeof(p->accent), "%s", "#89b4fa");
-    snprintf(p->code_bg, sizeof(p->code_bg), "%s", "#11111b");
-    snprintf(p->surface, sizeof(p->surface), "%s", "#313244");
-    snprintf(p->sel, sizeof(p->sel), "%s", "#45475a");
-    p->dark = 1;
-}
-
-static void palette_load_omarchy(Palette *p)
-{
-    const char *home = getenv("HOME");
-    char path[512];
-    char *toml;
-    char buf[64];
-
-    palette_default(p);
-    if (!home)
-        return;
-    snprintf(path, sizeof(path),
-             "%s/.local/state/omarchy/current/theme/colors.toml", home);
-    toml = read_entire_file(path, NULL);
-    if (!toml)
-        return;
-
-    if (toml_get(toml, "mode", buf, sizeof(buf)))
-        p->dark = (strcmp(buf, "light") != 0);
-
-    if (toml_get(toml, "background", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->bg, sizeof(p->bg), buf);
-    if (toml_get(toml, "foreground", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->fg, sizeof(p->fg), buf);
-    if (toml_get(toml, "muted", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->muted, sizeof(p->muted), buf);
-    else if (toml_get(toml, "dark_foreground", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->muted, sizeof(p->muted), buf);
-    if (toml_get(toml, "accent", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->accent, sizeof(p->accent), buf);
-    else if (toml_get(toml, "blue", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->accent, sizeof(p->accent), buf);
-    if (toml_get(toml, "dark_background", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->code_bg, sizeof(p->code_bg), buf);
-    else if (toml_get(toml, "darker_background", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->code_bg, sizeof(p->code_bg), buf);
-    if (toml_get(toml, "lighter_background", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->surface, sizeof(p->surface), buf);
-    if (toml_get(toml, "selection", buf, sizeof(buf)) && valid_hex_color(buf))
-        set_color(p->sel, sizeof(p->sel), buf);
-
-    free(toml);
-}
-
-static char *build_css(const Palette *p)
-{
-    char *css;
-    /* sizeof a string literal includes the '\0'.  We size generously
-     * so snprintf cannot truncate the sheet. */
-    const size_t cap = 8192;
-    css = malloc(cap);
-    if (!css)
-        return NULL;
-
-    snprintf(css, cap,
-        ":root {\n"
-        "  --bg: %s;\n"
-        "  --fg: %s;\n"
-        "  --muted: %s;\n"
-        "  --accent: %s;\n"
-        "  --code-bg: %s;\n"
-        "  --surface: %s;\n"
-        "  --sel: %s;\n"
-        "}\n"
-        "html, body {\n"
-        "  background: var(--bg);\n"
-        "  color: var(--fg);\n"
-        "  margin: 0;\n"
-        "}\n"
-        "body {\n"
-        "  font-family: \"iA Writer Mono S\", ui-monospace, monospace;\n"
-        "  font-size: 16px;\n"
-        "  line-height: 1.7;\n"
-        "}\n"
-        "article.md {\n"
-        "  max-width: 42rem;\n"
-        "  margin: 0 auto;\n"
-        "  padding: 2.4rem 4.2rem 4rem 1.4rem;\n"
-        "}\n"
-        "h1, h2, h3, h4, h5, h6 {\n"
-        "  line-height: 1.25;\n"
-        "  font-weight: 700;\n"
-        "  margin: 1.6em 0 0.5em;\n"
-        "}\n"
-        "h1 { font-size: 2.0em; margin-top: 0; }\n"
-        "h2 { font-size: 1.45em; padding-bottom: 0.2em;\n"
-        "     border-bottom: 1px solid var(--surface); }\n"
-        "h3 { font-size: 1.18em; }\n"
-        "p, ul, ol, blockquote, table, pre { margin: 0.85em 0; }\n"
-        "a { color: var(--accent); text-decoration: none; }\n"
-        "a:hover { text-decoration: underline; }\n"
-        "code {\n"
-        "  font-family: \"iA Writer Mono S\", ui-monospace, monospace;\n"
-        "  font-size: 0.92em;\n"
-        "  background: var(--code-bg);\n"
-        "  padding: 0.12em 0.38em;\n"
-        "  border-radius: 4px;\n"
-        "}\n"
-        "pre {\n"
-        "  background: var(--code-bg);\n"
-        "  border: 1px solid var(--surface);\n"
-        "  border-radius: 8px;\n"
-        "  padding: 0.9em 1em;\n"
-        "  overflow: auto;\n"
-        "}\n"
-        "pre code { background: none; padding: 0; font-size: 0.86em; }\n"
-        "blockquote {\n"
-        "  border-left: 3px solid var(--accent);\n"
-        "  margin-left: 0;\n"
-        "  padding: 0.15em 0 0.15em 1em;\n"
-        "  color: var(--muted);\n"
-        "}\n"
-        "hr {\n"
-        "  border: 0;\n"
-        "  border-top: 1px solid var(--surface);\n"
-        "  margin: 1.8em 0;\n"
-        "}\n"
-        "table { border-collapse: collapse; width: 100%%; }\n"
-        "th, td {\n"
-        "  border: 1px solid var(--surface);\n"
-        "  padding: 0.4em 0.7em;\n"
-        "  text-align: left;\n"
-        "}\n"
-        "th { background: var(--code-bg); }\n"
-        "tr:nth-child(even) td { background: color-mix(in srgb, var(--surface) 35%%, transparent); }\n"
-        "img { max-width: 100%%; height: auto; border-radius: 6px; }\n"
-        "li > p { margin: 0.25em 0; }\n"
-        "li:has(> input[type=checkbox]) { list-style: none; margin-left: -1.3em; }\n"
-        "input[type=checkbox] { margin-right: 0.45em; }\n"
-        "::selection { background: var(--sel); }\n",
-        p->bg, p->fg, p->muted, p->accent, p->code_bg, p->surface, p->sel);
-    return css;
-}
-
 /* GTK's own stylesheet for the chrome we draw: a chrome-less window
- * and the floating mode toggle.  This is *not* the document
+ * and the floating overlay buttons.  This is *not* the document
  * CSS — that goes into WebKit.  GtkCssProvider is how you add CSS
  * to GTK widgets at runtime. */
 static void apply_ui_css(App *app, const Palette *p)
 {
-    char css[2560];
+    char css[4096];
 
     snprintf(css, sizeof(css),
         "window {"
@@ -613,7 +141,7 @@ static void apply_ui_css(App *app, const Palette *p)
         "  color: %s;"
         "  font-family: \"iA Writer Mono S\", monospace;"
         "}"
-        "#omamd-mode-toggle {"
+        ".omamd-overlay-btn {"
         "  min-width: 44px;"
         "  min-height: 44px;"
         "  padding: 0;"
@@ -625,11 +153,11 @@ static void apply_ui_css(App *app, const Palette *p)
         "  outline: none;"
         "  color: %s;"
         "}"
-        "#omamd-mode-toggle:hover {"
+        ".omamd-overlay-btn:hover {"
         "  background-color: alpha(%s, 0.66);"
         "  border-color: alpha(%s, 0.7);"
         "}"
-        "#omamd-mode-toggle:active {"
+        ".omamd-overlay-btn:active {"
         "  background-color: alpha(%s, 0.82);"
         "}",
         p->bg, p->bg,
@@ -651,52 +179,20 @@ static void apply_ui_css(App *app, const Palette *p)
     gtk_css_provider_load_from_data(app->ui_css, css, -1, NULL);
 }
 
-static void escape_html_str(GString *out, const char *s)
-{
-    for (; s && *s; s++) {
-        switch (*s) {
-        case '&':  g_string_append(out, "&amp;");  break;
-        case '<':  g_string_append(out, "&lt;");   break;
-        case '>':  g_string_append(out, "&gt;");   break;
-        case '"':  g_string_append(out, "&quot;"); break;
-        default:   g_string_append_c(out, *s);     break;
-        }
-    }
-}
-
-/* Wrap a body fragment in a full HTML document.  GString is GLib's
- * growable string — the same idea as Buf in markdown.c, already
- * written for us because we linked GTK. */
-static char *wrap_document(const char *title, const char *css, const char *body)
-{
-    GString *s = g_string_new(NULL);
-    g_string_append(s,
-        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-        "<title>");
-    escape_html_str(s, title ? title : "omamd");
-    g_string_append(s, "</title><style>");
-    append_bundled_fonts(s);
-    g_string_append(s, css ? css : "");
-    g_string_append(s, "</style></head><body><article class=\"md\">");
-    g_string_append(s, body ? body : "");
-    g_string_append(s, "</article><div id=\"omamd-end\"></div></body></html>");
-    return g_string_free(s, FALSE); /* FALSE = hand the bytes to the caller */
-}
-
 /* The page shown when nothing is open yet. */
 static const char *const WELCOME_MD =
     "# omamd\n"
     "\n"
-    "A small Markdown viewer.  Open a file with **Ctrl+O**, drop one "
-    "onto this window, or start it as:\n"
+    "A small Markdown viewer.  Open a file with **Ctrl+O**, the folder "
+    "button, drop one onto this window, or start it as:\n"
     "\n"
     "```\n"
     "omamd notes.md\n"
     "```\n"
     "\n"
     "The round button in the top-right corner switches between the "
-    "rendered page and the Markdown source (`Ctrl+1` / `Ctrl+2`).\n"
+    "rendered page and the Markdown source (`Ctrl+1` / `Ctrl+2`).  "
+    "Open, Theme, and Follow sit in the bottom-right corner.\n"
     "\n"
     "## What the parser understands\n"
     "\n"
@@ -706,7 +202,7 @@ static const char *const WELCOME_MD =
     "\n"
     "> Edit the C, run `make`, and this page is yours to change.\n"
     "\n"
-    "Read `src/markdown.h` then `src/markdown.c` then this file, `src/main.c`.\n";
+    "Read `core/markdown.h` then `core/markdown.c` then this file, `linux/gtk.c`.\n";
 
 /* ---------------------------------------------------------------
  * Loading a document into the widgets
@@ -829,7 +325,8 @@ static void app_render_text(App *app, const char *md, size_t n, const char *titl
         show_error(app, "Out of memory while converting Markdown.");
         return;
     }
-    page = wrap_document(title, app->css, fragment);
+    page = omamd_document(title, app->css, fragment,
+                          omamd_font_dir()[0] ? omamd_font_dir() : NULL);
     free(fragment);
     if (!page) {
         show_error(app, "Out of memory while wrapping HTML.");
@@ -838,7 +335,7 @@ static void app_render_text(App *app, const char *md, size_t n, const char *titl
 
     webkit_web_view_load_html(WEBKIT_WEB_VIEW(app->web_view), page,
                               app->base_uri ? app->base_uri : "about:blank");
-    g_free(page);
+    free(page);
 
     buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(app->text_view));
     gtk_text_buffer_set_text(buf, md ? md : "", (gint)n);
@@ -862,7 +359,7 @@ static void app_show_welcome(App *app)
     g_free(app->base_uri);
     app->base_uri = NULL;
     free(app->source);
-    app->source = dup_str(WELCOME_MD);
+    app->source = omamd_dup_str(WELCOME_MD);
     app_render_text(app, WELCOME_MD, strlen(WELCOME_MD), "welcome");
 }
 
@@ -922,7 +419,7 @@ static void app_watch(App *app, const char *path)
 static int app_load_path(App *app, const char *path, int follow)
 {
     size_t n = 0;
-    char *md = read_entire_file(path, &n);
+    char *md = omamd_read_file(path, &n);
     char *dir;
     const char *slash;
     const char *title;
@@ -943,13 +440,13 @@ static int app_load_path(App *app, const char *path, int follow)
      * leave `path` dangling (and the window title as garbage). */
     if (path != app->path) {
         free(app->path);
-        app->path = dup_str(path);
+        app->path = omamd_dup_str(path);
         path = app->path;
     }
 
     g_free(app->base_uri);
     free(app->doc_dir);
-    dir = dir_of(path);
+    dir = omamd_dir_of(path);
     app->doc_dir = dir ? realpath(dir, NULL) : NULL;
     app->base_uri = g_filename_to_uri(dir, NULL, NULL);
     /* A directory URI must end in / so "pic.png" resolves next to the file. */
@@ -975,7 +472,7 @@ static gboolean app_reload_now(gpointer user_data)
     App *app = user_data;
     app->reload_timeout = 0;
     if (app->path)
-        app_load_path(app, app->path, 1);
+        app_load_path(app, app->path, app->follow_enabled);
     return G_SOURCE_REMOVE;
 }
 
@@ -1062,6 +559,7 @@ static void on_destroy(GtkWidget *widget, gpointer user_data)
     g_free(app->base_uri);
     free(app->source);
     free(app->css);
+    free(app->pin_path);
     free(app);
     gtk_main_quit();
 }
@@ -1181,7 +679,7 @@ static gboolean on_decide_policy(WebKitWebView *web_view,
             GError *err = NULL;
             char *path = g_filename_from_uri(uri, NULL, &err);
             g_clear_error(&err);
-            if (path && is_markdown_path(path) &&
+            if (path && omamd_is_markdown_path(path) &&
                 app->doc_dir && path_is_under_dir(path, app->doc_dir)) {
                 app_load_path(app, path, 0);
                 g_free(path);
@@ -1261,14 +759,11 @@ static gboolean on_key(GtkWidget *widget, GdkEventKey *e, gpointer user_data)
 }
 
 /*
- * Tiny SVG → GtkImage.  `</>` when you are looking at the rendered
- * page (click to see source); an eye when you are in source (click
- * to preview).  Drawn as SVG so we can colour it with the Omarchy
- * palette instead of hoping a font glyph exists.
+ * Tiny SVG → GtkImage.  Drawn as SVG so we can colour the overlay
+ * with the Omarchy palette instead of hoping a font glyph exists.
  */
-static GtkWidget *mode_icon_image(const char *color, int source)
+static GtkWidget *svg_image(const char *svg, const char *fallback_icon)
 {
-    char svg[900];
     gsize svg_len;
     GInputStream *in;
     GdkPixbuf *pb;
@@ -1283,6 +778,28 @@ static GtkWidget *mode_icon_image(const char *color, int source)
         if (scale < 1)
             scale = 1;
     }
+
+    svg_len = strlen(svg);
+    in = g_memory_input_stream_new_from_data(g_strdup(svg), (gssize)svg_len, g_free);
+    pb = gdk_pixbuf_new_from_stream_at_scale(in, 22 * scale, 22 * scale, TRUE, NULL, NULL);
+    g_object_unref(in);
+    if (!pb)
+        return gtk_image_new_from_icon_name(fallback_icon, GTK_ICON_SIZE_BUTTON);
+
+    if (scale > 1) {
+        cairo_surface_t *surf = gdk_cairo_surface_create_from_pixbuf(pb, scale, NULL);
+        img = gtk_image_new_from_surface(surf);
+        cairo_surface_destroy(surf);
+    } else {
+        img = gtk_image_new_from_pixbuf(pb);
+    }
+    g_object_unref(pb);
+    return img;
+}
+
+static GtkWidget *mode_icon_image(const char *color, int source)
+{
+    char svg[900];
 
     if (source) {
         /* Eye: you are in source, click to preview. */
@@ -1311,24 +828,121 @@ static GtkWidget *mode_icon_image(const char *color, int source)
             color, color, color);
     }
 
-    svg_len = strlen(svg);
-    in = g_memory_input_stream_new_from_data(g_strdup(svg), (gssize)svg_len, g_free);
-    pb = gdk_pixbuf_new_from_stream_at_scale(in, 22 * scale, 22 * scale, TRUE, NULL, NULL);
-    g_object_unref(in);
-    if (!pb)
-        return gtk_image_new_from_icon_name(
-            source ? "view-reveal-symbolic" : "text-x-generic-symbolic",
-            GTK_ICON_SIZE_BUTTON);
+    return svg_image(svg, source ? "view-reveal-symbolic" : "text-x-generic-symbolic");
+}
 
-    if (scale > 1) {
-        cairo_surface_t *surf = gdk_cairo_surface_create_from_pixbuf(pb, scale, NULL);
-        img = gtk_image_new_from_surface(surf);
-        cairo_surface_destroy(surf);
-    } else {
-        img = gtk_image_new_from_pixbuf(pb);
+static GtkWidget *folder_icon_image(const char *color)
+{
+    char svg[700];
+
+    snprintf(svg, sizeof(svg),
+        "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'"
+        " viewBox='0 0 24 24' fill='none'>"
+        "<path d='M3.4 8.3A2.2 2.2 0 015.6 6.1h3.1l1.5 1.8h8.2A2.2 2.2 0 0120.6"
+        " 10.1v6.7a2.2 2.2 0 01-2.2 2.2H5.6A2.2 2.2 0 013.4 16.8z'"
+        " stroke='%s' stroke-width='1.8' stroke-linejoin='round'/>"
+        "</svg>",
+        color);
+    return svg_image(svg, "folder-symbolic");
+}
+
+static GtkWidget *palette_icon_image(const char *color)
+{
+    char svg[900];
+
+    snprintf(svg, sizeof(svg),
+        "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'"
+        " viewBox='0 0 24 24' fill='none'>"
+        "<path d='M12 3.5c-4.7 0-8.5 3.5-8.5 8 0 3.1 2.2 5.4 4.5 5.4"
+        " 1 0 1.6-.6 1.6-1.5 0-.4-.1-.8-.3-1.1-.2-.5-.3-1 .1-1.4.3-.5.9-.7"
+        " 1.5-.7h1.3c3.1 0 5.7-2.2 5.7-5.1C17.9 5.3 15.4 3.5 12 3.5z'"
+        " stroke='%s' stroke-width='1.7' stroke-linejoin='round'/>"
+        "<circle cx='8.3' cy='9.2' r='1.15' fill='%s'/>"
+        "<circle cx='11.9' cy='7.4' r='1.15' fill='%s'/>"
+        "<circle cx='15.3' cy='9.1' r='1.15' fill='%s'/>"
+        "<circle cx='9.6' cy='12.5' r='1.15' fill='%s'/>"
+        "</svg>",
+        color, color, color, color, color);
+    return svg_image(svg, "applications-graphics-symbolic");
+}
+
+static GtkWidget *pin_icon_image(const char *color, int on)
+{
+    char svg[900];
+
+    if (on) {
+        snprintf(svg, sizeof(svg),
+            "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'"
+            " viewBox='0 0 24 24' fill='none'>"
+            "<path d='M12 3.2c3.1 0 5.6 2.4 5.6 5.4 0 4.2-5.6 11.2-5.6 11.2"
+            "S6.4 12.8 6.4 8.6C6.4 5.6 8.9 3.2 12 3.2z' fill='%s'/>"
+            "<circle cx='12' cy='8.5' r='1.7' fill='%s' fill-opacity='0.35'/>"
+            "</svg>",
+            color, color);
+        return svg_image(svg, "view-pin-symbolic");
     }
-    g_object_unref(pb);
-    return img;
+    snprintf(svg, sizeof(svg),
+        "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'"
+        " viewBox='0 0 24 24' fill='none'>"
+        "<path d='M12 3.2c3.1 0 5.6 2.4 5.6 5.4 0 4.2-5.6 11.2-5.6 11.2"
+        "S6.4 12.8 6.4 8.6C6.4 5.6 8.9 3.2 12 3.2z' stroke='%s'"
+        " stroke-width='1.7' fill='none'/>"
+        "<circle cx='12' cy='8.5' r='1.55' stroke='%s' stroke-width='1.5'/>"
+        "<path d='M5 5.2L19 18.8' stroke='%s' stroke-width='1.8'"
+        " stroke-linecap='round'/>"
+        "</svg>",
+        color, color, color);
+    return svg_image(svg, "view-unpin-symbolic");
+}
+
+static const char *overlay_fg(App *app)
+{
+    return app->icon_fg[0] ? app->icon_fg : "#cdd6f4";
+}
+
+static const char *overlay_muted(App *app)
+{
+    if (app->icon_muted[0])
+        return app->icon_muted;
+    return overlay_fg(app);
+}
+
+static void overlay_refresh(App *app)
+{
+    int source;
+    const char *cur;
+    const char *pin_color;
+
+    if (!app->mode_btn)
+        return;
+    cur = gtk_stack_get_visible_child_name(GTK_STACK(app->stack));
+    source = (cur && strcmp(cur, "source") == 0);
+    gtk_button_set_image(GTK_BUTTON(app->mode_btn),
+                         mode_icon_image(overlay_fg(app), source));
+    gtk_widget_set_tooltip_text(
+        app->mode_btn,
+        source ? "Preview (Ctrl+1)" : "Source (Ctrl+2)");
+
+    if (app->open_btn) {
+        gtk_button_set_image(GTK_BUTTON(app->open_btn),
+                             folder_icon_image(overlay_fg(app)));
+        gtk_widget_set_tooltip_text(app->open_btn, "Open (Ctrl+O)");
+    }
+    if (app->theme_btn) {
+        gtk_button_set_image(GTK_BUTTON(app->theme_btn),
+                             palette_icon_image(overlay_fg(app)));
+        gtk_widget_set_tooltip_text(app->theme_btn, "Theme");
+    }
+    if (app->follow_btn) {
+        pin_color = app->follow_enabled ? overlay_fg(app) : overlay_muted(app);
+        gtk_button_set_image(GTK_BUTTON(app->follow_btn),
+                             pin_icon_image(pin_color, app->follow_enabled));
+        gtk_widget_set_tooltip_text(
+            app->follow_btn,
+            app->follow_enabled
+                ? "Follow on — jump to the end when the file changes"
+                : "Follow off — keep your scroll when the file changes");
+    }
 }
 
 static void set_mode(App *app, const char *name)
@@ -1337,11 +951,7 @@ static void set_mode(App *app, const char *name)
 
     gtk_stack_set_visible_child_name(GTK_STACK(app->stack),
                                      source ? "source" : "preview");
-    gtk_button_set_image(GTK_BUTTON(app->mode_btn),
-                         mode_icon_image(app->icon_fg, source));
-    gtk_widget_set_tooltip_text(
-        app->mode_btn,
-        source ? "Preview (Ctrl+1)" : "Source (Ctrl+2)");
+    overlay_refresh(app);
 }
 
 static void on_mode_clicked(GtkButton *button, gpointer user_data)
@@ -1356,30 +966,534 @@ static void on_mode_clicked(GtkButton *button, gpointer user_data)
         set_mode(app, "source");
 }
 
+static GtkWidget *overlay_button(App *app, GCallback cb)
+{
+    GtkWidget *btn = gtk_button_new();
+
+    gtk_style_context_add_class(gtk_widget_get_style_context(btn),
+                                "omamd-overlay-btn");
+    gtk_button_set_relief(GTK_BUTTON(btn), GTK_RELIEF_NONE);
+    gtk_button_set_always_show_image(GTK_BUTTON(btn), TRUE);
+    gtk_widget_set_can_focus(btn, FALSE);
+    g_signal_connect(btn, "clicked", cb, app);
+    return btn;
+}
+
+static void ui_ini_path(char *out, size_t n)
+{
+    char colors[512];
+    char dir[512];
+
+    if (!out || n == 0)
+        return;
+    out[0] = '\0';
+    theme_user_config_path(colors, sizeof(colors));
+    if (!theme_parent_dir(colors, dir, sizeof(dir)))
+        return;
+    if ((size_t)snprintf(out, n, "%s/ui.ini", dir) >= n)
+        out[0] = '\0';
+}
+
+static void app_save_ui(App *app)
+{
+    char path[1024];
+    char dir[512];
+    GKeyFile *kf;
+    GError *err = NULL;
+    gchar *data;
+    gsize len;
+
+    ui_ini_path(path, sizeof(path));
+    if (!path[0] || !theme_parent_dir(path, dir, sizeof(dir)))
+        return;
+    g_mkdir_with_parents(dir, 0700);
+    kf = g_key_file_new();
+    g_key_file_load_from_file(kf, path, G_KEY_FILE_KEEP_COMMENTS, NULL);
+    g_key_file_set_boolean(kf, "ui", "follow", app->follow_enabled != 0);
+    g_key_file_set_string(kf, "ui", "theme",
+                          app->theme_id[0] ? app->theme_id : "omarchy");
+    data = g_key_file_to_data(kf, &len, NULL);
+    if (data)
+        g_file_set_contents(path, data, (gssize)len, &err);
+    g_free(data);
+    g_clear_error(&err);
+    g_key_file_free(kf);
+}
+
+static void on_follow_clicked(GtkButton *button, gpointer user_data)
+{
+    App *app = user_data;
+    (void)button;
+    app->follow_enabled = !app->follow_enabled;
+    app_save_ui(app);
+    overlay_refresh(app);
+}
+
+static int theme_id_ok(const char *id)
+{
+    const char *p;
+
+    if (!id || !id[0] || strlen(id) >= 80)
+        return 0;
+    for (p = id; *p; p++) {
+        if (!(g_ascii_isalnum(*p) || *p == '-' || *p == '_'))
+            return 0;
+    }
+    return 1;
+}
+
+static void theme_display_name(const char *id, char *out, size_t n)
+{
+    size_t o = 0;
+    int cap = 1;
+    const char *p;
+
+    if (!out || n == 0)
+        return;
+    out[0] = '\0';
+    if (!id)
+        return;
+    for (p = id; *p && o + 1 < n; p++) {
+        if (*p == '-' || *p == '_') {
+            out[o++] = ' ';
+            cap = 1;
+            continue;
+        }
+        if (cap && g_ascii_isalpha(*p)) {
+            out[o++] = g_ascii_toupper(*p);
+            cap = 0;
+        } else {
+            out[o++] = *p;
+            if (g_ascii_isalpha(*p))
+                cap = 0;
+        }
+    }
+    out[o] = '\0';
+}
+
+static int dir_has_toml(const char *dir)
+{
+    GDir *d;
+    const char *name;
+    int ok = 0;
+
+    if (!dir || !dir[0])
+        return 0;
+    d = g_dir_open(dir, 0, NULL);
+    if (!d)
+        return 0;
+    while ((name = g_dir_read_name(d))) {
+        if (g_str_has_suffix(name, ".toml")) {
+            ok = 1;
+            break;
+        }
+    }
+    g_dir_close(d);
+    return ok;
+}
+
+static int try_themes_dir(const char *dir, char *out, size_t n)
+{
+    char *real;
+
+    if (!dir || !dir[0] || !dir_has_toml(dir))
+        return 0;
+    real = realpath(dir, NULL);
+    if (real) {
+        snprintf(out, n, "%s", real);
+        free(real);
+    } else {
+        snprintf(out, n, "%s", dir);
+    }
+    return 1;
+}
+
+static int themes_dir(char *out, size_t n)
+{
+    const char *env = getenv("OMAMD_THEMESDIR");
+    const char *home = getenv("HOME");
+    const char *fd = omamd_font_dir();
+    char buf[4200];
+    char *exe;
+    char *slash;
+
+    if (!out || n == 0)
+        return 0;
+    out[0] = '\0';
+    if (env && try_themes_dir(env, out, n))
+        return 1;
+    if (fd && fd[0]) {
+        snprintf(buf, sizeof(buf), "%s/../themes", fd);
+        if (try_themes_dir(buf, out, n))
+            return 1;
+        snprintf(buf, sizeof(buf), "%s/../examples/themes", fd);
+        if (try_themes_dir(buf, out, n))
+            return 1;
+    }
+    exe = g_file_read_link("/proc/self/exe", NULL);
+    if (exe) {
+        slash = strrchr(exe, '/');
+        if (slash) {
+            *slash = '\0';
+            snprintf(buf, sizeof(buf), "%s/../examples/themes", exe);
+            if (try_themes_dir(buf, out, n)) {
+                g_free(exe);
+                return 1;
+            }
+            snprintf(buf, sizeof(buf), "%s/../share/omamd/themes", exe);
+            if (try_themes_dir(buf, out, n)) {
+                g_free(exe);
+                return 1;
+            }
+        }
+        g_free(exe);
+    }
+    if (home) {
+        snprintf(buf, sizeof(buf), "%s/.local/share/omamd/themes", home);
+        if (try_themes_dir(buf, out, n))
+            return 1;
+    }
+    if (try_themes_dir("/usr/share/omamd/themes", out, n))
+        return 1;
+    if (try_themes_dir("examples/themes", out, n))
+        return 1;
+    return 0;
+}
+
+static int bundled_theme_path(const char *id, char *out, size_t n)
+{
+    char dir[4000];
+
+    if (!theme_id_ok(id) || !themes_dir(dir, sizeof(dir)))
+        return 0;
+    if ((size_t)snprintf(out, n, "%s/%s.toml", dir, id) >= n)
+        return 0;
+    return theme_path_is_file(out);
+}
+
+static gint cmp_ptrstr(gconstpointer a, gconstpointer b)
+{
+    const char *sa = *(char * const *)a;
+    const char *sb = *(char * const *)b;
+    return g_ascii_strcasecmp(sa, sb);
+}
+
+static GPtrArray *bundled_theme_ids(void)
+{
+    char dir[4200];
+    GDir *d;
+    const char *name;
+    GPtrArray *ids;
+
+    ids = g_ptr_array_new_with_free_func(g_free);
+    if (!themes_dir(dir, sizeof(dir)))
+        return ids;
+    d = g_dir_open(dir, 0, NULL);
+    if (!d)
+        return ids;
+    while ((name = g_dir_read_name(d))) {
+        char id[128];
+        size_t n;
+
+        if (!g_str_has_suffix(name, ".toml"))
+            continue;
+        n = strlen(name);
+        if (n <= 5 || n - 5 >= sizeof(id))
+            continue;
+        memcpy(id, name, n - 5);
+        id[n - 5] = '\0';
+        if (theme_id_ok(id))
+            g_ptr_array_add(ids, g_strdup(id));
+    }
+    g_dir_close(d);
+    g_ptr_array_sort(ids, cmp_ptrstr);
+    return ids;
+}
+
+static void app_clear_pin(App *app)
+{
+    free(app->pin_path);
+    app->pin_path = NULL;
+    app->pin_builtin = 0;
+}
+
+static gboolean app_apply_theme_now(gpointer user_data);
+static void app_watch_theme(App *app);
+
+static void app_select_theme(App *app, const char *id)
+{
+    char path[4400];
+
+    if (!id || !id[0])
+        return;
+    if (strcmp(id, "omarchy") == 0) {
+        app_clear_pin(app);
+        snprintf(app->theme_id, sizeof(app->theme_id), "omarchy");
+    } else if (strcmp(id, "default") == 0) {
+        app_clear_pin(app);
+        app->pin_builtin = 1;
+        snprintf(app->theme_id, sizeof(app->theme_id), "default");
+    } else if (bundled_theme_path(id, path, sizeof(path))) {
+        app_clear_pin(app);
+        app->pin_path = omamd_dup_str(path);
+        snprintf(app->theme_id, sizeof(app->theme_id), "%s", id);
+    } else {
+        return;
+    }
+    app_save_ui(app);
+    app_apply_theme_now(app);
+    app_watch_theme(app);
+}
+
+static void on_theme_item(GtkCheckMenuItem *item, gpointer user_data)
+{
+    App *app = user_data;
+    const char *id;
+
+    if (app->theme_menu_building)
+        return;
+    if (!gtk_check_menu_item_get_active(item))
+        return;
+    id = g_object_get_data(G_OBJECT(item), "theme-id");
+    if (id)
+        app_select_theme(app, id);
+}
+
+static void on_theme_choose_file(GtkMenuItem *item, gpointer user_data)
+{
+    App *app = user_data;
+    GtkWidget *dialog;
+    GtkFileFilter *toml, *any;
+    (void)item;
+
+    dialog = gtk_file_chooser_dialog_new(
+        "Choose a colors.toml",
+        GTK_WINDOW(app->window),
+        GTK_FILE_CHOOSER_ACTION_OPEN,
+        "_Cancel", GTK_RESPONSE_CANCEL,
+        "_Open", GTK_RESPONSE_ACCEPT,
+        NULL);
+    toml = gtk_file_filter_new();
+    gtk_file_filter_set_name(toml, "TOML");
+    gtk_file_filter_add_pattern(toml, "*.toml");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), toml);
+    any = gtk_file_filter_new();
+    gtk_file_filter_set_name(any, "All files");
+    gtk_file_filter_add_pattern(any, "*");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), any);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+        char *filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+        char dest[512];
+        char dir[512];
+        GFile *src, *dst;
+        GError *err = NULL;
+
+        if (filename) {
+            theme_user_config_path(dest, sizeof(dest));
+            if (theme_parent_dir(dest, dir, sizeof(dir)))
+                g_mkdir_with_parents(dir, 0700);
+            src = g_file_new_for_path(filename);
+            dst = g_file_new_for_path(dest);
+            if (g_file_copy(src, dst, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, &err)) {
+                app_clear_pin(app);
+                app->pin_path = omamd_dup_str(dest);
+                snprintf(app->theme_id, sizeof(app->theme_id), "custom");
+                app_save_ui(app);
+                app_apply_theme_now(app);
+                app_watch_theme(app);
+            }
+            g_clear_error(&err);
+            g_object_unref(src);
+            g_object_unref(dst);
+            g_free(filename);
+        }
+    }
+    gtk_widget_destroy(dialog);
+}
+
+static GtkWidget *theme_radio(App *app, GSList **group, const char *id,
+                              const char *label)
+{
+    GtkWidget *item;
+
+    item = gtk_radio_menu_item_new_with_label(*group, label);
+    if (!*group)
+        *group = gtk_radio_menu_item_get_group(GTK_RADIO_MENU_ITEM(item));
+    g_object_set_data_full(G_OBJECT(item), "theme-id", g_strdup(id), g_free);
+    if (strcmp(app->theme_id, id) == 0)
+        gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(item), TRUE);
+    g_signal_connect(item, "toggled", G_CALLBACK(on_theme_item), app);
+    gtk_menu_shell_append(GTK_MENU_SHELL(app->theme_menu), item);
+    return item;
+}
+
+static void theme_menu_rebuild(App *app)
+{
+    GList *children, *l;
+    GSList *group = NULL;
+    GPtrArray *ids;
+    guint i;
+    char live[512];
+    int have_live;
+
+    app->theme_menu_building = 1;
+    children = gtk_container_get_children(GTK_CONTAINER(app->theme_menu));
+    for (l = children; l; l = l->next)
+        gtk_widget_destroy(GTK_WIDGET(l->data));
+    g_list_free(children);
+
+    have_live = theme_omarchy_live_dir(live, sizeof(live));
+    if (!app->theme_id[0])
+        snprintf(app->theme_id, sizeof(app->theme_id),
+                 have_live ? "omarchy" : "default");
+
+    if (have_live)
+        theme_radio(app, &group, "omarchy", "Omarchy");
+    theme_radio(app, &group, "default", "Default");
+    gtk_menu_shell_append(GTK_MENU_SHELL(app->theme_menu),
+                          gtk_separator_menu_item_new());
+
+    ids = bundled_theme_ids();
+    for (i = 0; i < ids->len; i++) {
+        const char *id = ids->pdata[i];
+        char label[160];
+
+        theme_display_name(id, label, sizeof(label));
+        theme_radio(app, &group, id, label);
+    }
+    g_ptr_array_free(ids, TRUE);
+
+    if (strcmp(app->theme_id, "custom") == 0) {
+        GtkWidget *custom = theme_radio(app, &group, "custom", "Custom");
+        gtk_widget_set_sensitive(custom, FALSE);
+    }
+
+    gtk_menu_shell_append(GTK_MENU_SHELL(app->theme_menu),
+                          gtk_separator_menu_item_new());
+    {
+        GtkWidget *choose = gtk_menu_item_new_with_label("Choose File…");
+        g_signal_connect(choose, "activate", G_CALLBACK(on_theme_choose_file), app);
+        gtk_menu_shell_append(GTK_MENU_SHELL(app->theme_menu), choose);
+    }
+    gtk_widget_show_all(app->theme_menu);
+    app->theme_menu_building = 0;
+}
+
+static void on_theme_clicked(GtkButton *button, gpointer user_data)
+{
+    App *app = user_data;
+
+    theme_menu_rebuild(app);
+    gtk_menu_popup_at_widget(GTK_MENU(app->theme_menu), GTK_WIDGET(button),
+                             GDK_GRAVITY_SOUTH_EAST, GDK_GRAVITY_NORTH_EAST,
+                             NULL);
+}
+
+static void app_load_ui(App *app)
+{
+    char path[1024];
+    GKeyFile *kf;
+    gchar *th;
+
+    app->follow_enabled = 1;
+    ui_ini_path(path, sizeof(path));
+    if (!path[0])
+        return;
+    kf = g_key_file_new();
+    if (!g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL)) {
+        g_key_file_free(kf);
+        return;
+    }
+    if (g_key_file_has_key(kf, "ui", "follow", NULL))
+        app->follow_enabled = g_key_file_get_boolean(kf, "ui", "follow", NULL) ? 1 : 0;
+    th = g_key_file_get_string(kf, "ui", "theme", NULL);
+    if (th && th[0] && !g_theme_arg) {
+        if (strcmp(th, "omarchy") == 0) {
+            app_clear_pin(app);
+            snprintf(app->theme_id, sizeof(app->theme_id), "omarchy");
+        } else if (strcmp(th, "default") == 0) {
+            app_clear_pin(app);
+            app->pin_builtin = 1;
+            snprintf(app->theme_id, sizeof(app->theme_id), "default");
+        } else if (strcmp(th, "custom") == 0) {
+            char dest[512];
+
+            theme_user_config_path(dest, sizeof(dest));
+            if (theme_path_is_file(dest)) {
+                app_clear_pin(app);
+                app->pin_path = omamd_dup_str(dest);
+                snprintf(app->theme_id, sizeof(app->theme_id), "custom");
+            }
+        } else {
+            char bundled[4400];
+
+            if (bundled_theme_path(th, bundled, sizeof(bundled))) {
+                app_clear_pin(app);
+                app->pin_path = omamd_dup_str(bundled);
+                snprintf(app->theme_id, sizeof(app->theme_id), "%s", th);
+            }
+        }
+    }
+    g_free(th);
+    g_key_file_free(kf);
+}
+
 /* ---------------------------------------------------------------
- * Follow Omarchy theme changes
+ * Follow theme file changes
  *
- * `omarchy theme set` does this (in order):
+ * On Omarchy, `omarchy theme set` does this (in order):
  *   1. rm -rf ~/.local/state/omarchy/current/theme
  *   2. mv a freshly copied theme directory into that path
  *   3. rewrite current/theme.name
- *
  * A file monitor on colors.toml dies at step 1, so we also watch
- * the stable `current/` directory.  Events are debounced so we
- * apply once, after the new colors.toml is in place.
+ * the stable `current/` directory.
+ *
+ * Off Omarchy we watch ~/.config/omamd/ (and the file inside it)
+ * so a pasted colors.toml is picked up without a restart.  --theme
+ * PATH watches that file and its parent directory.
+ *
+ * Events are debounced so we apply once, after the new file is
+ * in place.
  * --------------------------------------------------------------- */
 
-static void omarchy_current_path(char *out, size_t out_sz, const char *leaf)
+static void app_watch_colors_file(App *app);
+static void on_theme_fs_event(GFileMonitor *monitor, GFile *file, GFile *other,
+                              GFileMonitorEvent event, gpointer user_data);
+
+static void watch_path_file(GFileMonitor **slot, const char *path, App *app)
 {
-    const char *home = getenv("HOME");
-    if (!home) {
-        out[0] = '\0';
-        return;
+    GFile *gf;
+
+    if (*slot) {
+        g_object_unref(*slot);
+        *slot = NULL;
     }
-    snprintf(out, out_sz, "%s/.local/state/omarchy/current/%s", home, leaf);
+    if (!path || !path[0] || !g_file_test(path, G_FILE_TEST_IS_REGULAR))
+        return;
+    gf = g_file_new_for_path(path);
+    *slot = g_file_monitor_file(gf, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
+    g_object_unref(gf);
+    if (*slot)
+        g_signal_connect(*slot, "changed", G_CALLBACK(on_theme_fs_event), app);
 }
 
-static void app_watch_colors_file(App *app);
+static void watch_path_dir(GFileMonitor **slot, const char *path, App *app)
+{
+    GFile *gf;
+
+    if (*slot) {
+        g_object_unref(*slot);
+        *slot = NULL;
+    }
+    if (!path || !path[0] || !g_file_test(path, G_FILE_TEST_IS_DIR))
+        return;
+    gf = g_file_new_for_path(path);
+    *slot = g_file_monitor_directory(gf, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
+    g_object_unref(gf);
+    if (*slot)
+        g_signal_connect(*slot, "changed", G_CALLBACK(on_theme_fs_event), app);
+}
 
 static gboolean app_apply_theme_now(gpointer user_data)
 {
@@ -1388,21 +1502,36 @@ static gboolean app_apply_theme_now(gpointer user_data)
     GdkRGBA bg;
     char *css;
     char colors_path[512];
+    char live_dir[512];
+    ThemeKind kind;
     const char *page;
     const char *title;
 
     app->theme_timeout = 0;
 
-    omarchy_current_path(colors_path, sizeof(colors_path), "theme/colors.toml");
-    if (colors_path[0] == '\0' ||
-        !g_file_test(colors_path, G_FILE_TEST_IS_REGULAR)) {
-        /* Between rm and mv.  Try again shortly. */
-        app->theme_timeout = g_timeout_add(80, app_apply_theme_now, app);
-        return G_SOURCE_REMOVE;
+    kind = THEME_KIND_NONE;
+    colors_path[0] = '\0';
+    if (app->pin_builtin) {
+        kind = THEME_KIND_NONE;
+    } else if (app->pin_path && app->pin_path[0]) {
+        snprintf(colors_path, sizeof(colors_path), "%s", app->pin_path);
+        if (theme_path_is_file(colors_path))
+            kind = THEME_KIND_EXPLICIT;
+    } else {
+        kind = theme_resolve(g_theme_arg, colors_path, sizeof(colors_path), 1);
+        if (kind == THEME_KIND_NONE &&
+            theme_omarchy_live_dir(live_dir, sizeof(live_dir))) {
+            /* Between rm and mv on Omarchy.  Try again shortly. */
+            app->theme_timeout = g_timeout_add(80, app_apply_theme_now, app);
+            return G_SOURCE_REMOVE;
+        }
     }
 
-    palette_load_omarchy(&pal);
-    css = build_css(&pal);
+    palette_default(&pal);
+    if (kind != THEME_KIND_NONE)
+        palette_load_file(&pal, colors_path);
+
+    css = omamd_css(&pal);
     if (!css)
         return G_SOURCE_REMOVE;
 
@@ -1414,7 +1543,8 @@ static gboolean app_apply_theme_now(gpointer user_data)
 
     free(app->css);
     app->css = css;
-    set_color(app->icon_fg, sizeof(app->icon_fg), pal.fg);
+    snprintf(app->icon_fg, sizeof(app->icon_fg), "%s", pal.fg);
+    snprintf(app->icon_muted, sizeof(app->icon_muted), "%s", pal.muted);
     apply_ui_css(app, &pal);
     if (gdk_rgba_parse(&bg, pal.bg))
         webkit_web_view_set_background_color(WEBKIT_WEB_VIEW(app->web_view), &bg);
@@ -1451,47 +1581,66 @@ static void on_theme_fs_event(GFileMonitor *monitor, GFile *file, GFile *other,
 static void app_watch_colors_file(App *app)
 {
     char path[512];
-    GFile *gf;
+    ThemeKind kind;
 
-    if (app->theme_colors_mon) {
-        g_object_unref(app->theme_colors_mon);
-        app->theme_colors_mon = NULL;
-    }
-    omarchy_current_path(path, sizeof(path), "theme/colors.toml");
-    if (path[0] == '\0' || !g_file_test(path, G_FILE_TEST_IS_REGULAR))
+    if (app->pin_builtin) {
+        if (app->theme_colors_mon) {
+            g_object_unref(app->theme_colors_mon);
+            app->theme_colors_mon = NULL;
+        }
         return;
-    gf = g_file_new_for_path(path);
-    app->theme_colors_mon = g_file_monitor_file(
-        gf, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
-    g_object_unref(gf);
-    if (app->theme_colors_mon)
-        g_signal_connect(app->theme_colors_mon, "changed",
-                         G_CALLBACK(on_theme_fs_event), app);
+    }
+    if (app->pin_path && app->pin_path[0]) {
+        watch_path_file(&app->theme_colors_mon, app->pin_path, app);
+        return;
+    }
+    kind = theme_resolve(g_theme_arg, path, sizeof(path), 0);
+    if (kind == THEME_KIND_NONE)
+        theme_user_config_path(path, sizeof(path));
+    watch_path_file(&app->theme_colors_mon, path, app);
 }
 
 static void app_watch_theme(App *app)
 {
     char path[512];
-    GFile *gf;
+    char dir[512];
+    ThemeKind kind;
 
-    omarchy_current_path(path, sizeof(path), "");
-    if (path[0] == '\0')
+    if (app->pin_builtin) {
+        app_clear_theme_watch(app);
         return;
-    /* Trailing slash from "%s/" + "" — strip it for g_file_new. */
-    {
-        size_t n = strlen(path);
-        if (n > 0 && path[n - 1] == '/')
-            path[n - 1] = '\0';
     }
-    gf = g_file_new_for_path(path);
-    app->theme_dir_mon = g_file_monitor_directory(
-        gf, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
-    g_object_unref(gf);
-    if (app->theme_dir_mon)
-        g_signal_connect(app->theme_dir_mon, "changed",
-                         G_CALLBACK(on_theme_fs_event), app);
+    if (app->pin_path && app->pin_path[0]) {
+        watch_path_file(&app->theme_colors_mon, app->pin_path, app);
+        if (theme_parent_dir(app->pin_path, dir, sizeof(dir)))
+            watch_path_dir(&app->theme_dir_mon, dir, app);
+        else if (app->theme_dir_mon) {
+            g_object_unref(app->theme_dir_mon);
+            app->theme_dir_mon = NULL;
+        }
+        return;
+    }
 
-    app_watch_colors_file(app);
+    kind = theme_resolve(g_theme_arg, path, sizeof(path), 0);
+
+    if (kind == THEME_KIND_EXPLICIT) {
+        watch_path_file(&app->theme_colors_mon, path, app);
+        if (theme_parent_dir(path, dir, sizeof(dir)))
+            watch_path_dir(&app->theme_dir_mon, dir, app);
+        return;
+    }
+
+    if (theme_omarchy_live_dir(dir, sizeof(dir))) {
+        watch_path_dir(&app->theme_dir_mon, dir, app);
+        if (kind == THEME_KIND_OMARCHY)
+            watch_path_file(&app->theme_colors_mon, path, app);
+        return;
+    }
+
+    theme_user_config_path(path, sizeof(path));
+    if (theme_parent_dir(path, dir, sizeof(dir)))
+        watch_path_dir(&app->theme_dir_mon, dir, app);
+    watch_path_file(&app->theme_colors_mon, path, app);
 }
 
 static void app_clear_theme_watch(App *app)
@@ -1516,8 +1665,13 @@ static void app_clear_theme_watch(App *app)
 
 static void build_ui(App *app)
 {
-    GtkWidget *overlay, *scroll;
+    GtkWidget *overlay, *scroll, *cluster;
     WebKitSettings *wk;
+
+    app->follow_enabled = 1;
+    app_load_ui(app);
+    if (g_theme_arg && g_theme_arg[0])
+        snprintf(app->theme_id, sizeof(app->theme_id), "custom");
 
     app->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(app->window), "omamd");
@@ -1574,15 +1728,31 @@ static void build_ui(App *app)
     overlay = gtk_overlay_new();
     gtk_container_add(GTK_CONTAINER(overlay), app->stack);
 
-    app->mode_btn = gtk_button_new();
+    app->mode_btn = overlay_button(app, G_CALLBACK(on_mode_clicked));
     gtk_widget_set_name(app->mode_btn, "omamd-mode-toggle");
-    gtk_button_set_relief(GTK_BUTTON(app->mode_btn), GTK_RELIEF_NONE);
-    gtk_button_set_always_show_image(GTK_BUTTON(app->mode_btn), TRUE);
     gtk_widget_set_halign(app->mode_btn, GTK_ALIGN_END);
     gtk_widget_set_valign(app->mode_btn, GTK_ALIGN_START);
     gtk_widget_set_margin_top(app->mode_btn, 14);
     gtk_widget_set_margin_end(app->mode_btn, 14);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), app->mode_btn);
+
+    /* Open, Theme, Follow — same cluster as the Apple overlay. */
+    cluster = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_name(cluster, "omamd-overlay-cluster");
+    gtk_widget_set_halign(cluster, GTK_ALIGN_END);
+    gtk_widget_set_valign(cluster, GTK_ALIGN_END);
+    gtk_widget_set_margin_bottom(cluster, 14);
+    gtk_widget_set_margin_end(cluster, 14);
+    app->open_btn = overlay_button(app, G_CALLBACK(on_open_clicked));
+    app->theme_btn = overlay_button(app, G_CALLBACK(on_theme_clicked));
+    app->follow_btn = overlay_button(app, G_CALLBACK(on_follow_clicked));
+    gtk_box_pack_start(GTK_BOX(cluster), app->open_btn, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(cluster), app->theme_btn, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(cluster), app->follow_btn, FALSE, FALSE, 0);
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), cluster);
+
+    app->theme_menu = gtk_menu_new();
+    gtk_menu_attach_to_widget(GTK_MENU(app->theme_menu), app->theme_btn, NULL);
 
     gtk_container_add(GTK_CONTAINER(app->window), overlay);
 
@@ -1590,7 +1760,6 @@ static void build_ui(App *app)
     gtk_drag_dest_set(app->window, GTK_DEST_DEFAULT_ALL, NULL, 0, GDK_ACTION_COPY);
     gtk_drag_dest_add_uri_targets(app->window);
 
-    g_signal_connect(app->mode_btn, "clicked", G_CALLBACK(on_mode_clicked), app);
     g_signal_connect(app->window, "destroy", G_CALLBACK(on_destroy), app);
     g_signal_connect(app->window, "key-press-event", G_CALLBACK(on_key), app);
     g_signal_connect(app->window, "drag-data-received", G_CALLBACK(on_drag_data), app);
@@ -1601,189 +1770,46 @@ static void build_ui(App *app)
     app_watch_theme(app);
 }
 
-static void usage(FILE *out)
-{
-    fprintf(out,
-            "omamd %s — a small Markdown viewer\n"
-            "\n"
-            "Usage:\n"
-            "  omamd [file.md]         open in a window\n"
-            "  omamd --term [file.md]  render in the terminal (SSH)\n"
-            "  omamd --html [file.md]  Markdown to HTML on stdout\n"
-            "  omamd --help            this text\n"
-            "\n"
-            "Keys:  Ctrl+O open   Ctrl+R reload   Ctrl+1 preview\n"
-            "       Ctrl+2 source Ctrl+Q quit     F5 reload\n"
-            "Term:  j/k scroll    g/G top/end     f follow  q quit\n",
-            OMAMD_VERSION);
-}
-
-static int run_html_mode(const char *path)
-{
-    size_t n = 0;
-    char *md;
-    char *fragment;
-    char *page;
-    Palette pal;
-    char *css;
-    const char *title = "omamd";
-
-    if (path) {
-        const char *slash;
-        md = read_entire_file(path, &n);
-        if (!md) {
-            fprintf(stderr, "omamd: cannot read %s\n", path);
-            return 1;
-        }
-        slash = strrchr(path, '/');
-        title = slash ? slash + 1 : path;
-    } else {
-        md = read_entire_stdin(&n);
-        if (!md) {
-            fprintf(stderr, "omamd: out of memory\n");
-            return 1;
-        }
-    }
-
-    fragment = markdown_to_html(md, n);
-    free(md);
-    if (!fragment) {
-        fprintf(stderr, "omamd: out of memory\n");
-        return 1;
-    }
-    palette_load_omarchy(&pal);
-    css = build_css(&pal);
-    page = wrap_document(title, css, fragment);
-    free(fragment);
-    free(css);
-    if (!page) {
-        fprintf(stderr, "omamd: out of memory\n");
-        return 1;
-    }
-    fputs(page, stdout);
-    g_free(page);
-    return 0;
-}
-
-static unsigned rgb_parse(const char *s)
-{
-    unsigned r = 0xcd, g = 0xd6, b = 0xf4;
-    if (!s || s[0] != '#')
-        return (r << 16) | (g << 8) | b;
-    if (s[1] && s[2] && s[3] && s[4] == '\0') {
-        if (sscanf(s, "#%1x%1x%1x", &r, &g, &b) == 3)
-            return (r * 17u << 16) | (g * 17u << 8) | (b * 17u);
-    }
-    if (sscanf(s, "#%02x%02x%02x", &r, &g, &b) == 3)
-        return (r << 16) | (g << 8) | b;
-    return (0xcdu << 16) | (0xd6u << 8) | 0xf4u;
-}
-
-static char *term_reread(const char *path, size_t *n)
-{
-    return read_entire_file(path, n);
-}
-
-static int no_display(void)
-{
-    const char *w = getenv("WAYLAND_DISPLAY");
-    const char *d = getenv("DISPLAY");
-    return (w == NULL || w[0] == '\0') && (d == NULL || d[0] == '\0');
-}
-
-static int run_term_mode(const char *path)
-{
-    size_t n = 0;
-    char *md;
-    Palette pal;
-    TermPalette tp;
-    int rc;
-    const char *watch = path;
-
-    if (path) {
-        md = read_entire_file(path, &n);
-        if (!md) {
-            fprintf(stderr, "omamd: cannot read %s\n", path);
-            return 1;
-        }
-    } else {
-        md = read_entire_stdin(&n);
-        if (!md) {
-            fprintf(stderr, "omamd: out of memory\n");
-            return 1;
-        }
-        watch = NULL;
-    }
-
-    palette_load_omarchy(&pal);
-    memset(&tp, 0, sizeof(tp));
-    tp.color = getenv("NO_COLOR") == NULL;
-    tp.fg = rgb_parse(pal.fg);
-    tp.bg = rgb_parse(pal.bg);
-    tp.accent = rgb_parse(pal.accent);
-    tp.muted = rgb_parse(pal.muted);
-    tp.code_bg = rgb_parse(pal.code_bg);
-
-    rc = term_run(watch, md, n, &tp, watch ? term_reread : NULL);
-    free(md);
-    return rc;
-}
-
 int main(int argc, char **argv)
 {
-    int html_mode = 0;
-    int term_mode = 0;
-    const char *path = NULL;
-    int i;
+    OmamdCli o;
     App *app;
 
-    for (i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            usage(stdout);
-            return 0;
-        }
-        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
-            printf("omamd %s\n", OMAMD_VERSION);
-            return 0;
-        }
-        if (strcmp(argv[i], "--html") == 0) {
-            html_mode = 1;
-            continue;
-        }
-        if (strcmp(argv[i], "--term") == 0 || strcmp(argv[i], "-t") == 0) {
-            term_mode = 1;
-            continue;
-        }
-        if (argv[i][0] == '-') {
-            fprintf(stderr, "omamd: unknown option %s\n", argv[i]);
-            usage(stderr);
-            return 2;
-        }
-        path = argv[i];
+    if (omamd_cli_parse(argc, argv, &o) != 0) {
+        omamd_cli_usage(stderr);
+        return 2;
+    }
+    if (o.help) {
+        omamd_cli_usage(stdout);
+        return 0;
+    }
+    if (o.version) {
+        printf("omamd %s\n", OMAMD_VERSION);
+        return 0;
     }
 
-    load_app_fonts();
+    g_theme_arg = o.theme;
+    omamd_init_fonts(argv[0]);
+    register_app_fonts();
 
-    if (html_mode)
-        return run_html_mode(path);
-    if (!term_mode && !html_mode && no_display())
-        term_mode = 1;
-    if (term_mode)
-        return run_term_mode(path);
+    if (o.html)
+        return omamd_run_html(o.path, o.theme);
+    if (o.term || omamd_no_display())
+        return omamd_run_term(o.path, o.theme);
 
     /* gtk_init_check talks to the display.  If the socket is gone
      * (SSH without forwarding, empty DISPLAY), open the pager
      * instead of dying with "cannot open display". */
     if (!gtk_init_check(&argc, &argv))
-        return run_term_mode(path);
+        return omamd_run_term(o.path, o.theme);
 
     app = calloc(1, sizeof(App));
     if (!app)
         return 1;
     build_ui(app);
 
-    if (path) {
-        if (!app_load_path(app, path, 0))
+    if (o.path) {
+        if (!app_load_path(app, o.path, 0))
             app_show_welcome(app);
     } else {
         app_show_welcome(app);

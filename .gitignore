@@ -5,4 +5,10 @@
 *.pkg.tar.*
 *.src.tar.*
 *.o
-omamd
+/omamd
+xcuserdata/
+*.xcuserstate
+.DS_Store
+examples/colors-gurra.toml
+gurka.html
+
