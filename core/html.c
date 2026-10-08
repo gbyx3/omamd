@@ -307,7 +307,30 @@ char *omamd_css(const Palette *p)
         "  height: 0.9em;\n"
         "}\n"
         "li:has(> input[type=checkbox]) > :not(input) { grid-column: 2; }\n"
-        "::selection { background: var(--sel); }\n");
+        "::selection { background: var(--sel); }\n"
+        "html {\n"
+        "  scrollbar-width: thin;\n"
+        "  scrollbar-color: color-mix(in srgb, var(--muted) 65%, transparent) transparent;\n"
+        "}\n"
+        "::-webkit-scrollbar {\n"
+        "  width: 7px;\n"
+        "  height: 7px;\n"
+        "}\n"
+        "::-webkit-scrollbar-track,\n"
+        "::-webkit-scrollbar-corner {\n"
+        "  background: transparent;\n"
+        "}\n"
+        "::-webkit-scrollbar-thumb {\n"
+        "  background: color-mix(in srgb, var(--muted) 55%, transparent);\n"
+        "  border-radius: 8px;\n"
+        "  border: 2px solid transparent;\n"
+        "  background-clip: padding-box;\n"
+        "}\n"
+        "::-webkit-scrollbar-thumb:hover {\n"
+        "  background: color-mix(in srgb, var(--fg) 50%, transparent);\n"
+        "  border: 2px solid transparent;\n"
+        "  background-clip: padding-box;\n"
+        "}\n");
     return buf_take(&b);
 }
 

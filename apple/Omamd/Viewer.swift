@@ -169,10 +169,15 @@ final class Viewer: ObservableObject {
             presentError("Could not read:\n\(path)")
             return
         }
+        let switching = fileURL != url
         fileURL = url
         docDir = url.deletingLastPathComponent()
         setDocument(markdown: text, title: url.lastPathComponent, follow: follow)
-        watchFile(url)
+        /* Re-arming kqueue on every reload drops later writes; only
+         * watch when opening a different file. */
+        if switching {
+            watchFile(url)
+        }
     }
 
     func reload(follow: Bool) {
@@ -343,11 +348,7 @@ final class Viewer: ObservableObject {
     private func scheduleFileReload() {
         reloadWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.reload(follow: self.followEnabled)
-            if let fileURL {
-                self.watchFile(fileURL)
-            }
+            self?.reload(follow: self?.followEnabled ?? true)
         }
         reloadWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
@@ -357,7 +358,6 @@ final class Viewer: ObservableObject {
         themeWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             self?.applyTheme()
-            self?.watchTheme()
         }
         themeWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)

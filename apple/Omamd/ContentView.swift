@@ -162,6 +162,7 @@ struct ContentView: View {
             docDir: viewer.docDir,
             followGeneration: UInt(viewer.followGeneration),
             hideTitleBar: viewer.hideTitleBar,
+            dark: viewer.palette.dark,
             onOpenMarkdown: viewer.openMarkdownLink
         )
     }

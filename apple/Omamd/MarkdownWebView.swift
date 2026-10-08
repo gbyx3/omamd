@@ -12,6 +12,7 @@ struct MarkdownWebView {
     var docDir: URL?
     var followGeneration: UInt
     var hideTitleBar: Bool
+    var dark: Bool
     var onOpenMarkdown: (URL) -> Void
 
     func makeCoordinator() -> MarkdownWebCoordinator {
@@ -38,14 +39,74 @@ struct MarkdownWebView {
         #endif
     }
 
+    static func articleBody(_ html: String) -> String? {
+        let open = "<article class=\"md\">"
+        guard let start = html.range(of: open, options: .caseInsensitive),
+              let end = html.range(of: "</article>", options: [.caseInsensitive, .backwards]),
+              start.upperBound <= end.lowerBound else { return nil }
+        return String(html[start.upperBound..<end.lowerBound])
+    }
+
+    static func styleContents(_ html: String) -> String? {
+        guard let start = html.range(of: "<style>", options: .caseInsensitive),
+              let end = html.range(of: "</style>", options: .caseInsensitive),
+              start.upperBound <= end.lowerBound else { return nil }
+        return String(html[start.upperBound..<end.lowerBound])
+    }
+
+    static func jsString(_ value: String?) -> String {
+        guard let value,
+              let data = try? JSONEncoder().encode(value),
+              let json = String(data: data, encoding: .utf8) else {
+            return "null"
+        }
+        return json
+    }
+
+    /* Update CSS and/or article.md in the live document so WebKit
+     * never unloads the page (loadHTMLString paints offset 0). */
+    static func patchLive(
+        _ view: WKWebView,
+        css: String?,
+        body: String?,
+        pinToEnd: Bool,
+        completion: @escaping (Bool) -> Void
+    ) {
+        let js = """
+        (function(css, html, pin){
+          var a=document.querySelector('article.md');
+          if(!a) return false;
+          if(typeof css==='string'){
+            var s=document.querySelector('head style');
+            if(s) s.textContent=css;
+          }
+          if(html!==null){
+            var r=document.scrollingElement||document.documentElement;
+            var y=r?r.scrollTop:0;
+            a.innerHTML=html;
+            if(pin && r){
+              r.scrollTop=Math.max(0, r.scrollHeight-r.clientHeight);
+            } else if(r){
+              r.scrollTop=y;
+            }
+          }
+          return true;
+        })(\(jsString(css)), \(jsString(body)), \(pinToEnd ? "true" : "false"))
+        """
+        view.evaluateJavaScript(js) { result, _ in
+            DispatchQueue.main.async {
+                completion((result as? Bool) == true)
+            }
+        }
+    }
+
     static func scrollToEnd(_ view: WKWebView) {
         view.evaluateJavaScript(
             """
             (function(){
               var r=document.scrollingElement||document.documentElement;
-              var t=Math.max(0,r.scrollHeight-r.clientHeight);
-              try{r.scrollTo({top:t,behavior:'smooth'});}
-              catch(e){r.scrollTop=t;}
+              if(!r) return;
+              r.scrollTop=Math.max(0, r.scrollHeight-r.clientHeight);
             })();
             """,
             completionHandler: nil
@@ -57,12 +118,46 @@ struct MarkdownWebView {
         coordinator.docDir = docDir
         coordinator.onOpenMarkdown = onOpenMarkdown
         coordinator.hideTitleBar = hideTitleBar
+        coordinator.dark = dark
+        coordinator.webView = view
         coordinator.applyChrome(view)
         if coordinator.html != html {
+            let pinToEnd = followGeneration != coordinator.scrolledFollow
+            let previous = coordinator.html
+            let next = html
+            let oldBody = Self.articleBody(previous)
+            let newBody = Self.articleBody(html)
+            let oldCss = Self.styleContents(previous)
+            let newCss = Self.styleContents(html)
+            let bodyChanged = oldBody != newBody
+            let cssChanged = oldCss != newCss
             coordinator.html = html
             coordinator.pendingFollow = followGeneration
-            Self.load(html, into: view, baseURL: baseURL)
-        } else if coordinator.scrolledFollow != followGeneration {
+            if previous != "", newBody != nil, bodyChanged || cssChanged {
+                Self.patchLive(
+                    view,
+                    css: cssChanged ? newCss : nil,
+                    body: bodyChanged ? newBody : nil,
+                    pinToEnd: pinToEnd && bodyChanged
+                ) { ok in
+                    guard coordinator.html == next else { return }
+                    if ok {
+                        coordinator.awaitingLoad = false
+                        if pinToEnd && bodyChanged {
+                            coordinator.scrolledFollow = coordinator.pendingFollow
+                        }
+                    } else {
+                        coordinator.awaitingLoad = true
+                        Self.load(next, into: view, baseURL: baseURL)
+                    }
+                }
+            } else {
+                coordinator.awaitingLoad = true
+                Self.load(html, into: view, baseURL: baseURL)
+            }
+        } else if !coordinator.awaitingLoad,
+                  coordinator.scrolledFollow != followGeneration {
+            coordinator.pendingFollow = followGeneration
             coordinator.scrolledFollow = followGeneration
             Self.scrollToEnd(view)
         }
@@ -136,14 +231,19 @@ final class MarkdownWebCoordinator: NSObject, WKNavigationDelegate {
     var onOpenMarkdown: (URL) -> Void = { _ in }
     var pendingFollow: UInt = 0
     var scrolledFollow: UInt = 0
+    var awaitingLoad = false
     var hideTitleBar = false
+    var dark = true
+    weak var webView: WKWebView?
 
     func applyChrome(_ webView: WKWebView) {
         #if os(macOS)
         WindowChrome.applyPageInsets(webView, flushTop: hideTitleBar)
         WindowChrome.suppressScrollPockets(webView, hidden: hideTitleBar)
+        WindowChrome.styleScrollers(webView, dark: dark)
         #else
         webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.scrollView.indicatorStyle = dark ? .white : .black
         if #available(iOS 26.0, *) {
             webView.obscuredContentInsets = .zero
         }
@@ -185,6 +285,7 @@ final class MarkdownWebCoordinator: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        awaitingLoad = false
         applyChrome(webView)
         guard pendingFollow != scrolledFollow else { return }
         scrolledFollow = pendingFollow
@@ -284,6 +385,7 @@ struct WindowChrome: NSViewRepresentable {
             /* Keep .titled so the window stays AXStandardWindow. Yabai
              * floats AXDialog, which is what you get without .titled. */
             window.styleMask.insert(.titled)
+            window.tabbingMode = .disallowed
             if hideTitleBar {
                 window.titleVisibility = .hidden
                 window.titlebarAppearsTransparent = true
@@ -300,6 +402,7 @@ struct WindowChrome: NSViewRepresentable {
             if let root = window.contentView {
                 WindowChrome.suppressScrollPockets(root, hidden: hideTitleBar)
                 WindowChrome.flushWebInsets(root, flushTop: hideTitleBar)
+                WindowChrome.styleScrollers(root, dark: dark)
             }
             /* WebKit reapplies title-bar insets after the style mask
              * change; flush once more on the next turn. */
@@ -307,6 +410,7 @@ struct WindowChrome: NSViewRepresentable {
                 guard let self, let root = self.window?.contentView else { return }
                 WindowChrome.suppressScrollPockets(root, hidden: self.hideTitleBar)
                 WindowChrome.flushWebInsets(root, flushTop: self.hideTitleBar)
+                WindowChrome.styleScrollers(root, dark: self.dark)
             }
         }
 
@@ -384,6 +488,21 @@ struct WindowChrome: NSViewRepresentable {
         } else {
             webView.additionalSafeAreaInsets = NSEdgeInsets()
         }
+    }
+
+    static func styleScrollers(_ root: NSView, dark: Bool) {
+        func walk(_ view: NSView) {
+            if let scroll = view as? NSScrollView {
+                scroll.scrollerStyle = .overlay
+                scroll.autohidesScrollers = true
+                scroll.verticalScroller?.controlSize = .small
+                scroll.verticalScroller?.knobStyle = dark ? .light : .dark
+                scroll.horizontalScroller?.controlSize = .small
+                scroll.horizontalScroller?.knobStyle = dark ? .light : .dark
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(root)
     }
 
     static func flushWebInsets(_ root: NSView, flushTop: Bool) {

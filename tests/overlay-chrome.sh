@@ -11,6 +11,8 @@ bad() { printf 'FAIL %s\n' "$1"; fail=1; }
 
 VIEWER=apple/Omamd/Viewer.swift
 CONTENT=apple/Omamd/ContentView.swift
+APP=apple/Omamd/OmamdApp.swift
+CHROME=apple/Omamd/MarkdownWebView.swift
 
 # --- #9 Mac theme drop-up menu ---
 if grep -q 'showSettingsWindow' "$VIEWER"; then
@@ -36,8 +38,16 @@ else
 	bad '#10 Follow feature was removed'
 fi
 
+# --- #7 yabai native window tabs ---
+if grep -q 'allowsAutomaticWindowTabbing = false' "$APP" \
+	&& grep -q 'tabbingMode = .disallowed' "$CHROME"; then
+	ok '#7 native window tabbing disabled'
+else
+	bad '#7 window tabbing still allowed (yabai retile on tab switch)'
+fi
+
 if [ "$fail" -ne 0 ]; then
-	echo 'overlay chrome: FAIL (open issues #9 #10)'
+	echo 'overlay chrome: FAIL'
 	exit 1
 fi
 echo 'ok (overlay chrome)'
